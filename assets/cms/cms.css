@@ -315,6 +315,7 @@ select.input { padding-right: 24px; }
 .starters { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin: 8px 0 24px; }
 .starter { display: flex; flex-direction: column; gap: 6px; padding: 18px 16px; text-align: left; font: inherit; color: var(--c-text); background: #fff; border: 1px solid var(--c-border); border-radius: 10px; cursor: pointer; box-shadow: var(--shadow); }
 .starter:hover { border-color: var(--c-brand); background: #fff8f8; }
+a.starter { text-decoration: none; }
 .starter__icon { color: var(--c-brand); }
 .starter strong { font-size: 1rem; }
 .starter span { font-size: .85rem; color: var(--c-muted); }

@@ -31,13 +31,14 @@ Screens are reached from the icon rail down the left edge (hover an icon for its
 |---|---|
 | **Pages** | A table of pages per **section**. Create pages and sections, move pages between sections with the dropdown on each row; hover a row for Edit, Open and more. |
 | **Edit** (a page) | The live preview (desktop / 1024 / 768 / 375, or the **HTML** view) with the inspector on the right: **Block** (the outline, or the selected block's fields), **Page** (heading, breadcrumb, banner, side column, versions) and **Section** (previous/next, page order, navigation settings). |
-| **Site** | Global masthead and quicklinks, local masthead, main navigation, global and marketing banners, footer. |
-| **Theme** | Every brand colour token, font stacks, base font size, custom CSS, presets. Updates the preview live. |
-| **Components** | A styleguide of all blocks in their default state with the current theme. |
 | **Media** | The image library: upload, drop files, see where each image is used, delete. |
 | **Import** | Grabber (recommended), pasted HTML, saved file, or URL (server only). |
 | **Save & export** | Project folder, project files, snapshots, per-page exports, whole-site ZIP. |
 | **Cloud** | Only once cloud saving is set up ([DEPLOY.md](DEPLOY.md)): sign in, upload this project, open or share cloud projects, restore earlier cloud copies. |
+| **Settings** (gear icon, foot of the rail) | Links to the three screens used less often: |
+| &nbsp;&nbsp;**Site** | Global masthead and quicklinks, local masthead, main navigation, global and marketing banners, footer. |
+| &nbsp;&nbsp;**Theme** | Every brand colour token, font stacks, base font size, custom CSS, presets. Updates the preview live. |
+| &nbsp;&nbsp;**Components** | A styleguide of all blocks in their default state with the current theme. |
 
 ## Editing in the preview
 

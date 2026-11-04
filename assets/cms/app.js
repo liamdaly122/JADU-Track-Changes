@@ -61,6 +61,7 @@
 
   /* ================= shell: icon rail and top bar ================= */
   var ICONS = {
+    settings: 'M12 8a4 4 0 0 1 4 4 4 4 0 0 1-4 4 4 4 0 0 1-4-4 4 4 0 0 1 4-4m0 2a2 2 0 0 0-2 2 2 2 0 0 0 2 2 2 2 0 0 0 2-2 2 2 0 0 0-2-2m-2 12c-.25 0-.46-.18-.5-.42l-.37-2.65c-.63-.25-1.17-.59-1.69-.99l-2.49 1.01c-.22.08-.49 0-.61-.22l-2-3.46a.493.493 0 0 1 .12-.64l2.11-1.66L4.5 12l.07-1-2.11-1.63a.493.493 0 0 1-.12-.64l2-3.46c.12-.22.39-.31.61-.22l2.49 1c.52-.39 1.06-.73 1.69-.98l.37-2.65c.04-.24.25-.42.5-.42h4c.25 0 .46.18.5.42l.37 2.65c.63.25 1.17.59 1.69.98l2.49-1c.22-.09.49 0 .61.22l2 3.46c.13.22.07.49-.12.64L19.43 11l.07 1-.07 1 2.11 1.63c.19.15.25.42.12.64l-2 3.46c-.12.22-.39.31-.61.22l-2.49-1c-.52.39-1.06.73-1.69.98l-.37 2.65c-.04.24-.25.42-.5.42h-4m1.25-18l-.37 2.61c-1.2.25-2.26.89-3.03 1.78L5.44 7.35l-.75 1.3L6.8 10.2a5.55 5.55 0 0 0 0 3.6l-2.12 1.56.75 1.3 2.43-1.04c.77.88 1.82 1.52 3.01 1.76l.37 2.62h1.52l.37-2.61c1.19-.25 2.24-.89 3.01-1.77l2.43 1.04.75-1.3-2.12-1.55c.4-1.17.4-2.44 0-3.61l2.11-1.55-.75-1.3-2.41 1.04a5.42 5.42 0 0 0-3.03-1.77L12.75 4h-1.5z',
     pages: 'M6 2c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6H6m0 2h7v5h5v11H6V4m2 8v2h8v-2H8m0 4v2h5v-2H8z',
     site: 'M16.36 14c.08-.66.14-1.32.14-2 0-.68-.06-1.34-.14-2h3.38c.16.64.26 1.31.26 2s-.1 1.36-.26 2m-5.15 5.56c.6-1.11 1.06-2.31 1.38-3.56h2.95a8.03 8.03 0 0 1-4.33 3.56M14.34 14H9.66c-.1-.66-.16-1.32-.16-2 0-.68.06-1.35.16-2h4.68c.09.65.16 1.32.16 2 0 .68-.07 1.34-.16 2M12 19.96c-.83-1.2-1.5-2.53-1.91-3.96h3.82c-.41 1.43-1.08 2.76-1.91 3.96M8 8H5.08A7.92 7.92 0 0 1 9.4 4.44C8.8 5.55 8.35 6.75 8 8m-2.92 8H8c.35 1.25.8 2.45 1.4 3.56A8 8 0 0 1 5.08 16m-.82-2C4.1 13.36 4 12.69 4 12s.1-1.36.26-2h3.38c-.08.66-.14 1.32-.14 2 0 .68.06 1.34.14 2M12 4.03c.83 1.2 1.5 2.54 1.91 3.97h-3.82c.41-1.43 1.08-2.77 1.91-3.97M18.92 8h-2.95a15.65 15.65 0 0 0-1.38-3.56c1.84.63 3.37 1.9 4.33 3.56M12 2C6.47 2 2 6.5 2 12a10 10 0 0 0 10 10 10 10 0 0 0 10-10A10 10 0 0 0 12 2z',
     theme: 'M12 22A10 10 0 0 1 2 12A10 10 0 0 1 12 2c5.5 0 10 4 10 9a6 6 0 0 1-6 6h-1.8c-.3 0-.5.2-.5.5 0 .1.1.2.1.3.4.5.6 1.1.6 1.7 0 1.4-1.1 2.5-2.4 2.5m0-18a8 8 0 0 0-8 8 8 8 0 0 0 8 8c.3 0 .5-.2.5-.5 0-.2-.1-.3-.1-.4-.4-.5-.6-1.1-.6-1.7 0-1.4 1.1-2.5 2.5-2.5H16a4 4 0 0 0 4-4c0-3.9-3.6-7-8-7m-5.5 6c.8 0 1.5.7 1.5 1.5S7.3 13 6.5 13 5 12.3 5 11.5 5.7 10 6.5 10m3-4c.8 0 1.5.7 1.5 1.5S10.3 9 9.5 9 8 8.3 8 7.5 8.7 6 9.5 6m5 0c.8 0 1.5.7 1.5 1.5S15.3 9 14.5 9 13 8.3 13 7.5 13.7 6 14.5 6m3 4c.8 0 1.5.7 1.5 1.5s-.7 1.5-1.5 1.5-1.5-.7-1.5-1.5.7-1.5 1.5-1.5z',
@@ -99,15 +100,18 @@
     return t.content.firstChild;
   }
   function iconBtn(name, title, onClick, extra) { return el('button', Object.assign({ type: 'button', class: 'ibtn', title: title, 'aria-label': title, onclick: onClick }, extra || {}), [icon(name)]); }
-  var RAIL = [['pages', 'Pages', 'pages'], ['site', 'Site', 'site'], ['theme', 'Theme', 'theme'], ['library', 'Components', 'library'], ['media', 'Media', 'media'], ['import', 'Import', 'import'], ['export', 'Save and export', 'export'], ['cloud', 'Cloud', 'cloud'], ['help', 'Help', 'help']];
+  // the last two items (Settings, Help) sit at the foot of the rail
+  var RAIL = [['pages', 'Pages', 'pages'], ['media', 'Media', 'media'], ['import', 'Import', 'import'], ['export', 'Save and export', 'export'], ['cloud', 'Cloud', 'cloud'], ['settings', 'Settings', 'settings'], ['help', 'Help', 'help']];
+  // screens reached from Settings keep Settings highlighted in the rail
+  var SETTINGS_VIEWS = { site: 1, theme: 1, library: 1 };
   function buildRail() {
     var rail = document.getElementById('rail');
     RAIL.forEach(function (r, i) {
-      if (i === RAIL.length - 1) rail.appendChild(el('span', { class: 'rail__spacer' }));
+      if (i === RAIL.length - 2) rail.appendChild(el('span', { class: 'rail__spacer' }));
       rail.appendChild(el('a', { class: 'rail__item', href: '#' + r[0], title: r[1], 'data-view': r[0], 'aria-label': r[1] }, [icon(r[2], 22), el('span', { class: 'rail__label', text: r[1] })]));
     });
   }
-  function setRailActive(view) { document.querySelectorAll('.rail__item').forEach(function (a) { a.classList.toggle('is-active', a.getAttribute('data-view') === (view === 'edit' ? 'pages' : view)); }); }
+  function setRailActive(view) { document.querySelectorAll('.rail__item').forEach(function (a) { a.classList.toggle('is-active', a.getAttribute('data-view') === (view === 'edit' ? 'pages' : SETTINGS_VIEWS[view] ? 'settings' : view)); }); }
   /* the top bar is rebuilt by every screen: a title (or the editor's controls) on the left, the save state and project actions on the right */
   function setTopbar(leftNodes, rightNodes) {
     var tb = document.getElementById('topbar');
@@ -144,7 +148,8 @@
     ];
   }
   function screenTopbar(title, extraLeft, extraRight) {
-    setTopbar([el('h1', { class: 'topbar__title', text: title })].concat(extraLeft || []), (extraRight || []).concat(projectActions()));
+    var back = SETTINGS_VIEWS[App.view] ? [el('a', { class: 'ibtn', href: '#settings', title: 'Back to settings', 'aria-label': 'Back to settings' }, [icon('back')])] : [];
+    setTopbar(back.concat([el('h1', { class: 'topbar__title', text: title })], extraLeft || []), (extraRight || []).concat(projectActions()));
   }
 
   /* ================= helpers ================= */
@@ -605,6 +610,7 @@
       case 'site': App.page = null; screenTopbar('Site'); root.appendChild(siteView()); break;
       case 'theme': App.page = null; screenTopbar('Theme'); root.appendChild(themeView()); break;
       case 'library': App.page = null; screenTopbar('Components'); root.appendChild(libraryView()); break;
+      case 'settings': App.page = null; screenTopbar('Settings'); root.appendChild(settingsView()); break;
       case 'media': App.page = null; screenTopbar('Media library'); root.appendChild(mediaView()); break;
       case 'import': App.page = null; screenTopbar('Import'); root.appendChild(importView()); break;
       case 'export': App.page = null; screenTopbar('Save and export'); root.appendChild(exportView()); break;
@@ -1244,6 +1250,17 @@
   }
 
   /* ================= site view ================= */
+  /* ================= settings: a hub for the screens that are not needed day to day ================= */
+  function settingsView() {
+    function tile(ic, title, text, hash) { return el('a', { class: 'starter', href: hash }, [el('span', { class: 'starter__icon' }, [icon(ic, 28)]), el('strong', { text: title }), el('span', { text: text })]); }
+    return el('div', { class: 'page-wrap' }, [
+      el('div', { class: 'starters' }, [
+        tile('site', 'Site', 'Masthead, navigation, banners and footer shared by every page.', '#site'),
+        tile('theme', 'Theme', 'Colours, fonts, presets and custom CSS for the whole project.', '#theme'),
+        tile('library', 'Components', 'Every block in its default state, shown with the current theme.', '#library')
+      ])
+    ]);
+  }
   function siteView() {
     var site = Store.data.site;
     var side = el('aside', { class: 'editor__side site-side' });
@@ -1914,7 +1931,7 @@
       el('div', { class: 'panel', html:
         '<h2>What this is</h2><p>A local prototyping CMS that renders pages with the real University of Leeds design system (v1.0.22) stylesheet and scripts, so prototypes look and behave exactly like leeds.ac.uk. It runs in your browser from a folder of files; nothing is installed and nothing is sent anywhere.</p>' +
         '<h2>Opening it</h2><p>Double-click <code>index.html</code>. That is all. (A local server, <code>serve.ps1</code>, is optional and only adds "import by URL"; the grabber extension covers that without a server.)</p>' +
-        '<h2>Finding your way around</h2><p>The icons down the left edge switch between Pages, Site, Theme, Components, Media, Import, Save &amp; export and Help (hover for the name). The bar across the top shows the current screen with its actions; in the editor it holds the page title, path, template and status, undo and redo, the preview width icons, the Preview / HTML switch, the save state dot, <strong>Open page</strong> and a <strong>&#8943;</strong> menu with versions, every export format, duplicate and delete.</p>' +
+        '<h2>Finding your way around</h2><p>The icons down the left edge switch between Pages, Media, Import, Save &amp; export, Cloud, Settings and Help (hover for the name). <strong>Settings</strong> holds the screens you need less often: Site (masthead, navigation, banners and footer), Theme (colours, fonts and custom CSS) and Components (every block with the current theme). The bar across the top shows the current screen with its actions; in the editor it holds the page title, path, template and status, undo and redo, the preview width icons, the Preview / HTML switch, the save state dot, <strong>Open page</strong> and a <strong>&#8943;</strong> menu with versions, every export format, duplicate and delete.</p>' +
         '<h2>Editing</h2><ul><li><strong>Click</strong> a block in the preview to select it; a toolbar appears with move up/down, duplicate, delete and "Add below". <strong>Drag ☰</strong> to move a block.</li><li><strong>Hover</strong> a block in the preview and a red <strong>+</strong> appears on a dashed line below it (above it when you hover its top edge): click it to insert a block there. The red <strong>+</strong> in the top bar inserts below the selected block, or at the end. The inserter has search, category chips and your recently used blocks; Enter inserts the first match.</li><li><strong>Double-click text</strong> in the preview to edit it in place. Enter or clicking away saves; Esc cancels.</li><li><strong>Ctrl+click</strong> a link in the preview to follow it.</li><li>The <strong>HTML</strong> switch in the top bar shows the design-system markup of the page or the selected block, with Copy for Jadu.</li><li>The panel on the right is the <strong>inspector</strong>. <strong>Block</strong> lists the page\'s blocks (the outline) until you select one, then shows that block\'s fields; <strong>Page</strong> holds the heading, breadcrumb, banner, side column and versions; <strong>Section</strong> shows where the page sits, lets you step between the pages of its section, reorder them and change the generated navigation.</li><li><strong>Sections</strong> group pages: the side menu, contents list and previous/next links are generated from the pages in a section.</li><li><kbd>Esc</kbd> returns from a block to the outline.</li></ul>' +
         '<h2>Images</h2><p>Every image field has <strong>Library</strong>, <strong>Upload</strong> and placeholder buttons, and accepts a dropped file. The rich text toolbar has an Image button too. Images live in the Media library (browser database, and your project folder when linked), not inside the page, so the project stays small.</p>' +
         '<h2>Saving</h2><p>Autosave is always on. For safety, <strong>link a project folder</strong> (Save &amp; export): project.json and images are written there after every change. You can also save <strong>versions</strong> of a page (Ctrl+S), take whole-project <strong>snapshots</strong>, and <strong>save a project file</strong> (Ctrl+Shift+S).</p>' +
