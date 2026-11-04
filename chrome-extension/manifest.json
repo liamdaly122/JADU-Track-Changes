@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "Leeds CMS page grabber",
+  "description": "Send a leeds.ac.uk page, its main content, a single section, or a whole site section to the Leeds prototyping CMS.",
+  "version": "1.2.0",
+  "action": {
+    "default_title": "Send this page to the Leeds CMS",
+    "default_icon": { "16": "icon16.png", "32": "icon32.png", "48": "icon48.png", "128": "icon128.png" }
+  },
+  "icons": { "16": "icon16.png", "32": "icon32.png", "48": "icon48.png", "128": "icon128.png" },
+  "permissions": ["activeTab", "scripting", "tabs"],
+  "host_permissions": ["http://localhost/*", "http://127.0.0.1/*", "file:///*", "https://*.vercel.app/*"],
+  "background": { "service_worker": "background.js" }
+}

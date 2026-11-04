@@ -1,0 +1,14 @@
+# Your own exports and project files stay out of the repository
+*-project.json
+leeds-cms-project*.json
+exports/
+
+# Tools and editors
+.vercel/
+node_modules/
+.env
+.env.*
+.DS_Store
+Thumbs.db
+desktop.ini
+~$*

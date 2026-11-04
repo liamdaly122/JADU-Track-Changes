@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Editor redesign mockup</title>
+<style>
+  :root { --bg: #f4f3f1; --panel: #fff; --line: #e3e0dc; --text: #1f1d1d; --muted: #6b6765; --accent: #c70000; --rail: #171414; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 13px/1.45 "Segoe UI", system-ui, sans-serif; color: var(--text); background: var(--bg); height: 100vh; display: grid; grid-template-columns: 56px 1fr 360px; grid-template-rows: 48px 1fr; }
+  .rail { grid-row: 1 / 3; background: var(--rail); display: flex; flex-direction: column; align-items: center; padding: 10px 0; gap: 4px; }
+  .rail .logo { width: 28px; height: 28px; background: var(--accent); border-radius: 6px; margin-bottom: 12px; }
+  .rail button { width: 40px; height: 40px; border: 0; background: transparent; color: #cfc9c5; border-radius: 8px; font-size: 18px; cursor: pointer; position: relative; }
+  .rail button:hover, .rail button.on { background: #2b2626; color: #fff; }
+  .rail button.on::before { content: ""; position: absolute; left: -8px; top: 10px; width: 3px; height: 20px; background: var(--accent); border-radius: 2px; }
+  .rail .spacer { flex: 1; }
+  .top { grid-column: 2; display: flex; align-items: center; gap: 10px; padding: 0 14px; background: var(--panel); border-bottom: 1px solid var(--line); }
+  .top .back { color: var(--muted); text-decoration: none; }
+  .top .title { font-weight: 700; font-size: 15px; padding: 4px 6px; border-radius: 4px; }
+  .top .title:hover { background: #f4f3f1; }
+  .chip { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 10px; background: #efeae6; color: #5f5754; text-transform: uppercase; letter-spacing: .04em; }
+  .chip.pub { background: #e3f0f1; color: #156265; }
+  .top .mid { flex: 1; display: flex; justify-content: center; gap: 6px; align-items: center; }
+  .ib { width: 32px; height: 32px; border: 1px solid transparent; background: transparent; border-radius: 6px; cursor: pointer; font-size: 15px; color: #444; }
+  .ib:hover { background: #f4f3f1; border-color: var(--line); }
+  .ib.on { background: #1f1d1d; color: #fff; }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; margin-left: 10px; }
+  .seg button { border: 0; background: #fff; padding: 6px 12px; font: inherit; cursor: pointer; }
+  .seg button.on { background: #1f1d1d; color: #fff; }
+  .saved { color: var(--muted); font-size: 12px; display: flex; align-items: center; gap: 6px; }
+  .saved i { width: 8px; height: 8px; border-radius: 50%; background: #3a9018; display: inline-block; }
+  .btn { font: inherit; font-weight: 600; padding: 7px 12px; border-radius: 6px; border: 1px solid var(--line); background: #fff; cursor: pointer; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .canvas { grid-column: 2; overflow: auto; padding: 24px; display: flex; justify-content: center; }
+  .page { width: 100%; max-width: 900px; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.08), 0 8px 30px rgba(0,0,0,.06); border-radius: 4px; overflow: hidden; }
+  .ds-head { background: #0e0c0c; height: 56px; display: flex; align-items: center; padding: 0 20px; gap: 14px; }
+  .ds-head b { color: #fff; font-family: Georgia, serif; letter-spacing: .5px; }
+  .ds-head span { color: #ccc; font-size: 12px; }
+  .ds-nav { height: 42px; border-bottom: 1px solid #eee; display: flex; align-items: center; gap: 22px; padding: 0 20px; font-size: 13px; }
+  .ds-nav b { color: var(--accent); }
+  .body { padding: 28px 36px; display: grid; grid-template-columns: 200px 1fr; gap: 36px; }
+  .side h4 { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin: 0 0 6px; }
+  .side ul { list-style: none; padding: 0; margin: 0 0 20px; font-size: 13px; }
+  .side li { padding: 5px 0; border-bottom: 1px solid #f0f0f0; }
+  .side li.cur { color: var(--accent); font-weight: 700; }
+  .block { position: relative; padding: 10px 12px; border-radius: 4px; margin: 0 -12px 6px; }
+  .block:hover { outline: 1px dashed #d9b8b8; }
+  .block.sel { outline: 2px solid var(--accent); }
+  .block h1 { font-family: Georgia, serif; font-size: 30px; margin: 0 0 6px; }
+  .block h2 { font-family: Georgia, serif; font-size: 22px; margin: 0 0 8px; }
+  .block p { margin: 0 0 8px; font-size: 15px; line-height: 1.55; color: #333; }
+  .toolbar { position: absolute; top: -14px; right: 8px; background: #1f1d1d; color: #fff; border-radius: 6px; display: flex; gap: 2px; padding: 3px 4px; font-size: 12px; box-shadow: 0 4px 12px rgba(0,0,0,.25); }
+  .toolbar span { padding: 4px 7px; border-radius: 4px; }
+  .toolbar span:first-child { color: #ffd27a; font-weight: 700; }
+  .toolbar span:hover { background: var(--accent); }
+  .plus { display: flex; align-items: center; gap: 10px; margin: 2px -12px 8px; color: #bbb; }
+  .plus::before, .plus::after { content: ""; flex: 1; height: 1px; background: #eee; }
+  .plus b { width: 22px; height: 22px; border-radius: 50%; border: 1px solid #ccc; display: inline-flex; align-items: center; justify-content: center; font-weight: 400; background: #fff; cursor: pointer; }
+  .plus b:hover { border-color: var(--accent); color: var(--accent); }
+  .cta { border: 1px solid #f2c9c9; background: #fff6f6; border-radius: 4px; padding: 12px 14px; margin-bottom: 10px; }
+  .cta b { color: var(--accent); }
+  .insp { grid-column: 3; grid-row: 1 / 3; background: var(--panel); border-left: 1px solid var(--line); display: flex; flex-direction: column; }
+  .insp .tabs { display: flex; border-bottom: 1px solid var(--line); }
+  .insp .tabs button { flex: 1; border: 0; background: none; padding: 14px 4px; font: inherit; font-weight: 600; color: var(--muted); border-bottom: 2px solid transparent; cursor: pointer; }
+  .insp .tabs button.on { color: var(--text); border-bottom-color: var(--accent); }
+  .insp .body2 { padding: 14px 16px; overflow: auto; }
+  .insp h3 { font-size: 12px; margin: 0 0 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; display: flex; justify-content: space-between; }
+  .insp h3 small { font-weight: 400; text-transform: none; letter-spacing: 0; }
+  .group { border: 1px solid var(--line); border-radius: 8px; margin-bottom: 8px; }
+  .group > div:first-child { padding: 9px 12px; font-weight: 600; display: flex; justify-content: space-between; cursor: pointer; }
+  .group .fields { padding: 4px 12px 10px; border-top: 1px solid var(--line); }
+  label.f { display: block; margin: 8px 0 10px; }
+  label.f span { display: block; font-size: 12px; font-weight: 600; margin-bottom: 4px; color: #444; }
+  .input { width: 100%; padding: 7px 9px; border: 1px solid var(--line); border-radius: 6px; font: inherit; }
+  .input.ta { min-height: 70px; }
+  .foot { margin-top: auto; padding: 10px 16px; border-top: 1px solid var(--line); font-size: 12px; color: var(--muted); display: flex; justify-content: space-between; }
+  .note { position: fixed; left: 70px; bottom: 14px; background: #1f1d1d; color: #fff; padding: 8px 12px; border-radius: 6px; font-size: 12px; opacity: .9; }
+</style>
+</head>
+<body>
+  <nav class="rail" aria-label="Main">
+    <div class="logo" title="Leeds prototyping CMS"></div>
+    <button class="on" title="Pages">▤</button>
+    <button title="Site">⌂</button>
+    <button title="Theme">◐</button>
+    <button title="Media">▣</button>
+    <button title="Import">⇩</button>
+    <button title="Save and export">⇧</button>
+    <span class="spacer"></span>
+    <button title="Help">?</button>
+  </nav>
+
+  <header class="top">
+    <a class="back" href="#">‹ Pages</a>
+    <span class="title">Fees and funding</span>
+    <span class="chip">Draft</span>
+    <div class="mid">
+      <button class="ib" title="Undo">⟲</button><button class="ib" title="Redo">⟳</button>
+      <span style="width:14px"></span>
+      <button class="ib on" title="Desktop">▭</button><button class="ib" title="Tablet">▯</button><button class="ib" title="Mobile">▮</button>
+      <span class="seg"><button class="on">Preview</button><button>HTML</button></span>
+    </div>
+    <span class="saved"><i></i>Saved</span>
+    <button class="btn primary">Open page ↗</button>
+    <button class="ib" title="More: versions, export, duplicate, delete">⋯</button>
+  </header>
+
+  <main class="canvas">
+    <div class="page">
+      <div class="ds-head"><b>UNIVERSITY OF LEEDS</b><span>Current students ▾ &nbsp; Staff ▾ &nbsp; Faculties ▾ &nbsp; Alumni ▾</span></div>
+      <div class="ds-nav"><b>Home</b><span>Study ▾</span><span>Research and innovation</span><span>Business and partnerships</span><span>About</span></div>
+      <div class="body">
+        <aside class="side">
+          <h4>In this section</h4>
+          <ul><li>Leeds South Asia</li><li>Support with your application</li><li class="cur">Fees and funding</li><li>Visas and finance</li><li>Contact us</li></ul>
+          <h4>Related links</h4>
+          <ul><li>Find a representative</li></ul>
+        </aside>
+        <div>
+          <div class="block"><h1>Fees and funding</h1></div>
+          <div class="plus"><b>+</b></div>
+          <div class="block sel">
+            <div class="toolbar"><span>Rich text</span><span>↑</span><span>↓</span><span>⧉</span><span>✕</span><span>☰</span></div>
+            <p>To study in the UK you will need to show that you can cover your tuition fees and living costs. This page explains what to expect and where to find help.</p>
+            <p>Scholarships are available for students from India, Nepal, Bangladesh and Sri Lanka. Deadlines fall in the spring before you start.</p>
+          </div>
+          <div class="plus"><b>+</b></div>
+          <div class="block"><div class="cta"><b>Scholarships for South Asia →</b><br>Find out what you could be eligible for.</div></div>
+          <div class="plus"><b>+</b></div>
+          <div class="block"><h2>Living costs</h2><p>Leeds is one of the more affordable cities in the UK. Budget for accommodation, food, travel and study materials.</p></div>
+          <div class="plus"><b>+</b></div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <aside class="insp" aria-label="Inspector">
+    <div class="tabs"><button class="on">Block</button><button>Page</button><button>Section</button></div>
+    <div class="body2">
+      <h3>Rich text <small>block 2 of 4</small></h3>
+      <div class="group">
+        <div>Content <span>▾</span></div>
+        <div class="fields">
+          <label class="f"><span>Text</span><textarea class="input ta">To study in the UK you will need to show that you can cover your tuition fees and living costs…</textarea></label>
+          <div style="font-size:12px;color:#6b6765">Formatting toolbar appears above the text when editing. Double-click the text on the canvas to edit it there.</div>
+        </div>
+      </div>
+      <div class="group"><div>Spacing and layout <span>▸</span></div></div>
+      <div class="group"><div>Advanced <span>▸</span></div></div>
+      <h3 style="margin-top:22px">Outline</h3>
+      <div style="font-size:13px">
+        <div style="padding:6px 8px;border-radius:6px">☰ &nbsp;Page heading</div>
+        <div style="padding:6px 8px;border-radius:6px;background:#fff6f6;color:#c70000;font-weight:600">☰ &nbsp;Rich text</div>
+        <div style="padding:6px 8px;border-radius:6px">☰ &nbsp;In-text call to action</div>
+        <div style="padding:6px 8px;border-radius:6px">☰ &nbsp;Heading and text</div>
+      </div>
+    </div>
+    <div class="foot"><span>Section: Leeds South Asia · 3 of 5</span><span>‹ ›</span></div>
+  </aside>
+
+  <div class="note">Mockup only: layout and hierarchy, not final visual design.</div>
+</body>
+</html>
