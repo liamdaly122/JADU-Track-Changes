@@ -131,8 +131,10 @@ create trigger projects_before_update before update on public.projects
 -- ---------------------------------------------------------------- policies
 
 drop policy if exists "read own or shared projects" on public.projects;
+-- owner = auth.uid() is checked on the row itself: when a project is created and sent straight back to the app,
+-- can_read_project() cannot see the new row yet, so on its own it would reject the save
 create policy "read own or shared projects" on public.projects
-  for select to authenticated using (public.can_read_project(id));
+  for select to authenticated using (owner = auth.uid() or public.can_read_project(id));
 
 drop policy if exists "create own projects" on public.projects;
 create policy "create own projects" on public.projects
