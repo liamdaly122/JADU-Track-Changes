@@ -39,6 +39,7 @@
     pageNav: [S.bool('enabled', 'Show previous / next links'), S.text('prevLabel', 'Previous page title'), S.url('prevHref', 'Previous page URL'), S.text('nextLabel', 'Next page title'), S.url('nextHref', 'Next page URL')],
     featuredImage: [S.image('src', 'Featured image'), S.text('alt', 'Alt text'), S.text('caption', 'Caption')]
   };
+  var HERO_TYPES = [{ value: 'none', label: 'None' }, { value: 'banner', label: 'Banner carousel (homepage)' }, { value: 'hero', label: 'Hero banner (title over image)' }, { value: 'slideshow', label: 'Decorative slideshow' }];
   var heroSchemas = {
     banner: [S.list('items', 'Banner slides', [S.text('title', 'Title'), S.image('image', 'Image'), S.text('alt', 'Alt text'), S.textarea('lead', 'Lead text'), S.text('linkLabel', 'Link label'), S.url('linkHref', 'Link URL')], { itemLabel: 'title' })],
     hero: [S.text('title', 'Title'), S.textarea('lead', 'Lead'), S.image('image', 'Image'), S.text('alt', 'Alt text'), S.bool('useH1', 'Use as the page H1')],
@@ -407,6 +408,7 @@
   var NEEDS_JS = /uol-accordion|uol-gallery|js-uolTableStackable|uol-index-table|uol-form__input--select|uol-datepicker|bannerSlideshow|uol-banner|uol-in-page-navigation--with-accordion|uol-typeahead|uol-tabs|uol-filters-panel/;
   function reloadPreview(keepScroll) {
     if (App.previewMode === 'code') { renderCode(); return; }
+    if (App.previewMode === 'changes' && Preview.changesEl) { renderChangesSoon(); return; }
     if (!Preview.iframe) return;
     Preview.restoreScroll = keepScroll !== false;
     if (!Preview.ready || !Preview.stageEl) { Preview.ready = false; Preview.iframe.srcdoc = previewHtml(); return; }
@@ -431,6 +433,7 @@
   var reloadPreviewSoon = debounce(function () { reloadPreview(true); }, 700);
   function patchBlock(block) {
     if (App.previewMode === 'code') { renderCode(); return; }
+    if (App.previewMode === 'changes' && Preview.changesEl) { renderChangesSoon(); return; }
     if (!Preview.iframe || !Preview.ready) { reloadPreviewSoon(); return; }
     var html = R.renderBlock(block);
     Preview.iframe.contentWindow.postMessage({ uolcms: 'patch', id: block.id, html: html }, '*');
@@ -582,12 +585,25 @@
       el('pre', { tabindex: '0' })
     ]);
     Preview.codeEl = code;
-    var modeBar = el('div', { class: 'seg', role: 'group', 'aria-label': 'View' }, [['preview', 'Preview'], ['code', 'HTML']].map(function (m) {
-      return el('button', { type: 'button', class: 'seg__btn' + (App.previewMode === m[0] ? ' is-active' : ''), onclick: function () { App.previewMode = m[0]; modeBar.querySelectorAll('.seg__btn').forEach(function (b) { b.classList.remove('is-active'); }); this.classList.add('is-active'); var isCode = m[0] === 'code'; code.hidden = !isCode; scroller.hidden = isCode; devBar.style.visibility = isCode ? 'hidden' : ''; if (isCode) renderCode(); else reloadPreview(true); } }, [m[1]]);
+    /* the editor adds a third view: what changed since the original, for Jadu */
+    var changesEl = opts.changes ? el('div', { class: 'changes', hidden: true }) : null;
+    Preview.changesEl = changesEl;
+    if (App.previewMode === 'changes' && !changesEl) App.previewMode = 'preview';
+    var modes = [['preview', 'Preview'], ['code', 'HTML']].concat(changesEl ? [['changes', 'Changes']] : []);
+    var modeBar = el('div', { class: 'seg', role: 'group', 'aria-label': 'View' }, modes.map(function (m) {
+      return el('button', { type: 'button', class: 'seg__btn', 'data-mode': m[0], title: m[0] === 'changes' ? 'What changed since the original page, as a change list for Jadu' : null, onclick: function () { setMode(m[0]); } }, [m[1]]);
     }));
-    if (App.previewMode === 'code') { code.hidden = false; scroller.hidden = true; devBar.style.visibility = 'hidden'; }
+    function applyMode() {
+      var m = App.previewMode;
+      modeBar.querySelectorAll('.seg__btn').forEach(function (b) { b.classList.toggle('is-active', b.getAttribute('data-mode') === m); });
+      code.hidden = m !== 'code'; scroller.hidden = m !== 'preview'; if (changesEl) changesEl.hidden = m !== 'changes';
+      devBar.style.visibility = m === 'preview' ? '' : 'hidden';
+    }
+    function setMode(m) { App.previewMode = m; applyMode(); if (m === 'code') renderCode(); else if (m === 'changes') renderChanges(); else reloadPreview(true); }
+    Preview.setMode = setMode;
+    applyMode();
     var controls = el('div', { class: 'preview__controls' }, [devBar, modeBar]);
-    var children = [scroller, code];
+    var children = [scroller, code].concat(changesEl ? [changesEl] : []);
     if (opts.controlsHost) { opts.controlsHost.appendChild(controls); if (opts.extra && opts.extra.length) opts.extra.forEach(function (x) { opts.controlsHost.appendChild(x); }); }
     else children.unshift(el('div', { class: 'preview__bar' }, [controls, el('div', { class: 'preview__bar-right' }, opts.extra || [])]));
     var pane = el('section', { class: 'preview' }, children);
@@ -604,7 +620,7 @@
     var root = document.getElementById('app');
     root.innerHTML = '';
     root.className = 'app app--' + parts[0];
-    Preview.iframe = null; Preview.pending = null; Preview.stageEl = null; Preview.ready = false; Preview.codeEl = null; Preview.mode = 'page';
+    Preview.iframe = null; Preview.pending = null; Preview.stageEl = null; Preview.ready = false; Preview.codeEl = null; Preview.changesEl = null; Preview.setMode = null; Preview.mode = 'page';
     switch (parts[0]) {
       case 'edit': { var page = Store.getPage(parts[1]); if (!page) { go('#pages'); return; } App.page = page; Preview.page = page; recordBaseline(); root.appendChild(editorView()); break; }
       case 'site': App.page = null; screenTopbar('Site'); root.appendChild(siteView()); break;
@@ -641,7 +657,7 @@
       el('td', { class: 'ptable__title' }, [el('a', { href: '#edit/' + p.id, text: p.title }), el('span', { class: 'ptable__sub', text: (p.blocks || []).length + ' block' + ((p.blocks || []).length === 1 ? '' : 's') })]),
       el('td', { class: 'ptable__path ptable__hide-sm', text: '/' + p.slug }),
       el('td', {}, [el('span', { class: 'tag tag--' + p.template, text: p.template })]),
-      el('td', {}, [el('span', { class: 'status status--' + status, text: status })]),
+      el('td', { class: 'ptable__status', 'data-signoff': p.id }, [el('span', { class: 'status status--' + status, text: status })]),
       el('td', { class: 'ptable__hide-sm ptable__when', text: fmtTime(p.updatedAt) }),
       el('td', { class: 'ptable__hide-sm' }, [sectionSelect(p)]),
       el('td', {}, [el('span', { class: 'ptable__actions' }, [
@@ -725,6 +741,7 @@
     function render() {
       persist();
       list.innerHTML = '';
+      setTimeout(function () { fillSignoffChips(list); }, 0);
       if (!Store.data.pages.length && !Store.data.sections.length) { list.appendChild(starterTiles()); return; }
       var filtering = !!(search.value || tplSel.value || statusSel.value);
       Store.data.sections.forEach(function (s) {
@@ -793,6 +810,8 @@
     var more = menuButton(null, [
       { label: 'Save a version (Ctrl+S)', onClick: function () { saveVersion(); } },
       { label: 'Versions', onClick: function () { App.sideTab = 'page'; App.openGroup = 'versions'; renderEditorSide(); } },
+      { label: 'Changes for Jadu', onClick: function () { if (Preview.setMode) Preview.setMode('changes'); } },
+      { label: 'Share a review link…', onClick: function () { shareLinkDialog('page'); } },
       '-'
     ].concat(exportMenuItems(page)).concat(['-',
       { label: 'Duplicate page', onClick: function () { var c = Store.duplicatePage(page.id); toast('Duplicated as "' + c.title + '"', 'success'); go('#edit/' + c.id); } },
@@ -803,12 +822,14 @@
     ]), { icon: 'more', title: 'More actions' });
     setTopbar([el('a', { class: 'ibtn', href: '#pages', title: 'Back to pages', 'aria-label': 'Back to pages' }, [icon('back')]), titleInput, meta], [controlsHost, cloudChip(), el('span', { id: 'save-status', class: 'save-status' }), el('a', { class: 'btn btn--sm btn--primary', href: pageUrl(page), target: '_blank', rel: 'noopener', title: 'Open the page in a new tab' }, [el('span', { class: 'topbar__open-label', text: 'Open page' }), icon('external', 16)]), more]);
     sideEl = el('aside', { class: 'editor__side', 'aria-label': 'Inspector' });
-    var preview = previewPane({ controlsHost: controlsHost, extra: [iconBtn('refresh', 'Refresh the preview', function () { reloadPreview(true); })] });
+    var preview = previewPane({ controlsHost: controlsHost, changes: true, extra: [iconBtn('refresh', 'Refresh the preview', function () { reloadPreview(true); })] });
     var mobileTabs = mobileTabBar();
     var wrap = el('div', { class: 'editor', 'data-pane': App.mobilePane }, [mobileTabs, el('div', { class: 'editor__body' }, [preview, sideEl])]);
     mobileTabs.bind(wrap);
+    if (App.reviewPageId !== page.id) { App.reviewPageId = page.id; App.commentDraft = ''; App.commentTarget = ''; }
     renderEditorSide();
     setTimeout(updateUndoButtons, 0);
+    if (cloudReady()) loadReview(false);
     return wrap;
   }
   /* the Section tab replaced the old switcher strip; callers that changed section membership re-render it */
@@ -853,19 +874,21 @@
   }
 
   /* ================= inspector: the right-hand panel with Block, Page and Section tabs ================= */
-  var INSPECTOR_TABS = [['block', 'Block'], ['page', 'Page'], ['section', 'Section']];
+  var INSPECTOR_TABS = [['block', 'Block'], ['page', 'Page'], ['section', 'Section'], ['review', 'Review']];
   function normaliseTab(t) { return t === 'blocks' ? 'block' : (t === 'hero' || t === 'history') ? 'page' : (t || 'block'); }
   function renderEditorSide() {
     if (!sideEl || !App.page) return;
     App.sideTab = normaliseTab(App.sideTab);
     sideEl.innerHTML = '';
-    blockListEl = null; blockFormEl = null;
-    sideEl.appendChild(el('div', { class: 'tabs', role: 'tablist' }, INSPECTOR_TABS.map(function (t) { return el('button', { type: 'button', role: 'tab', class: 'tabs__tab' + (App.sideTab === t[0] ? ' is-active' : ''), 'aria-selected': App.sideTab === t[0] ? 'true' : 'false', onclick: function () { App.sideTab = t[0]; renderEditorSide(); } }, [t[1]]); })));
+    blockListEl = null; blockFormEl = null; reviewEls = null;
+    sideEl.appendChild(el('div', { class: 'tabs', role: 'tablist' }, INSPECTOR_TABS.map(function (t) { return el('button', { type: 'button', role: 'tab', 'data-tab': t[0], class: 'tabs__tab' + (App.sideTab === t[0] ? ' is-active' : ''), 'aria-selected': App.sideTab === t[0] ? 'true' : 'false', onclick: function () { App.sideTab = t[0]; renderEditorSide(); } }, [t[1]]); })));
     var body = el('div', { class: 'editor__side-body' });
     sideEl.appendChild(body);
     if (App.sideTab === 'block') renderBlockTab(body);
     else if (App.sideTab === 'page') renderPageTab(body);
+    else if (App.sideTab === 'review') renderReviewTab(body);
     else renderSectionTab(body);
+    updateReviewBadge();
   }
 
   /* ---------- Block tab: the outline when nothing is selected, otherwise the selected block's fields ---------- */
@@ -898,7 +921,8 @@
       row.appendChild(el('span', { class: 'outline__grip', 'aria-hidden': 'true', title: 'Drag to reorder', onmousedown: function () { row.draggable = true; }, onmouseup: function () { row.draggable = false; } }, ['☰']));
       row.appendChild(el('button', { type: 'button', class: 'outline__main', title: 'Edit this block', onclick: function () { selectBlock(b.id, { scroll: true }); } }, [
         el('span', { class: 'outline__num', text: i + 1 }),
-        el('span', { class: 'outline__text' }, [el('span', { class: 'outline__type', text: spec.label }), el('span', { class: 'outline__summary', text: blockSummary(b) })])
+        el('span', { class: 'outline__text' }, [el('span', { class: 'outline__type', text: spec.label }), el('span', { class: 'outline__summary', text: blockSummary(b) })]),
+        openCommentsFor(b.id) ? el('span', { class: 'outline__comments', title: openCommentsFor(b.id) + ' open comment' + (openCommentsFor(b.id) === 1 ? '' : 's') + ' (Review tab)', text: String(openCommentsFor(b.id)) }) : null
       ]));
       row.appendChild(el('span', { class: 'outline__actions' }, [
         iconBtn('up', 'Move up', function (e) { e.stopPropagation(); moveBlock(i, i - 1); }, { disabled: i === 0 }),
@@ -918,6 +942,7 @@
     var page = App.page;
     return menuButton(null, [
       { label: 'Add a block below', onClick: function () { addBlockDialog({ afterId: b.id }); } },
+      { label: 'Comment on this block', onClick: function () { commentOnBlock(b.id); } },
       { label: 'Duplicate', onClick: function () { var i = blockIndex(b.id); var c = JSON.parse(JSON.stringify(b)); c.id = Store.uid('blk'); page.blocks.splice(i + 1, 0, c); afterStructureChange(c.id); } },
       { label: 'Show HTML', onClick: function () { App.selectedBlock = b.id; App.codeScope = 'block'; var btn = document.querySelector('.seg__btn:nth-child(2)'); if (App.previewMode !== 'code' && btn) btn.click(); else renderCode(); } },
       { label: 'Copy markup (for Jadu)', onClick: function () { X.copyText(X.blockMarkup(b)).then(function () { toast('Block HTML copied', 'success'); }); } },
@@ -979,6 +1004,7 @@
   function selectBlock(id, opts) {
     opts = opts || {};
     if (id && !findBlock(id)) id = null;
+    if (App.sideTab === 'review' && opts.fromPreview && sideEl) { App.selectedBlock = id; setCommentTarget(id); highlightBlock(id, false); return; }
     var changed = App.selectedBlock !== id;
     App.selectedBlock = id;
     if (App.sideTab !== 'block' || changed || (id ? !blockFormEl : !blockListEl)) { App.sideTab = 'block'; renderEditorSide(); }
@@ -1140,7 +1166,7 @@
       else if (hero.type === 'slideshow') { if (!hero.slides) hero.slides = []; UI.renderForm(holder, heroSchemas.slideshow, hero, change); }
       else holder.appendChild(el('p', { class: 'muted small', text: 'No banner. Choose a banner type above.' }));
     }
-    UI.renderForm(body, [S.select('type', 'Banner type', [{ value: 'none', label: 'None' }, { value: 'banner', label: 'Banner carousel (homepage)' }, { value: 'hero', label: 'Hero banner (title over image)' }, { value: 'slideshow', label: 'Decorative slideshow' }])], hero, function () { if (hero.type === 'banner' && !(hero.items || []).length) hero.items = [{ title: page.title, image: PH + 'banner/banner-01.jpg', alt: '', lead: '', linkLabel: '', linkHref: '' }]; if (hero.type === 'hero' && !hero.title) { hero.title = page.title; hero.image = hero.image || PH + 'banner/banner-02.jpg'; } if (hero.type === 'slideshow' && !(hero.slides || []).length) hero.slides = [{ image: PH + 'banner/banner-01.jpg' }, { image: PH + 'banner/banner-03.jpg' }]; renderHero(); change(); });
+    UI.renderForm(body, [S.select('type', 'Banner type', HERO_TYPES)], hero, function () { if (hero.type === 'banner' && !(hero.items || []).length) hero.items = [{ title: page.title, image: PH + 'banner/banner-01.jpg', alt: '', lead: '', linkLabel: '', linkHref: '' }]; if (hero.type === 'hero' && !hero.title) { hero.title = page.title; hero.image = hero.image || PH + 'banner/banner-02.jpg'; } if (hero.type === 'slideshow' && !(hero.slides || []).length) hero.slides = [{ image: PH + 'banner/banner-01.jpg' }, { image: PH + 'banner/banner-03.jpg' }]; renderHero(); change(); });
     body.appendChild(holder);
     renderHero();
   }
@@ -1226,6 +1252,526 @@
     var st = section('Navigation settings', false);
     UI.renderForm(st.body, sectionFields(), sec, function () { Store.save(); var t = sideEl && sideEl.querySelector('.insp-head__text strong'); if (t) t.textContent = sec.title; reloadPreviewSoon(); });
     body.appendChild(st.el);
+  }
+
+  /* ================= review: changes for Jadu, check page, comments and sign-off, review links ================= */
+  var RV = window.UOL_REVIEW;
+  function option(value, text) { return el('option', { value: value, text: text }); }
+  function clipText(s, n) { s = String(s || '').replace(/\s+/g, ' ').trim(); return s.length > n ? s.slice(0, n - 1) + '…' : s; }
+  function who(email) { return email ? email.replace(/@.*/, '') : 'someone'; }
+
+  /* ---------- Changes for Jadu ---------- */
+  /* keep an untouched copy of an imported page, to list changes against later */
+  function keepOriginal(page, url) {
+    page.source = { url: url || '', importedAt: new Date().toISOString(), original: Store.clone({ title: page.title, template: page.template, settings: page.settings, hero: page.hero, blocks: page.blocks }) };
+  }
+  /* the page-level parts compared in Changes; navigation generated from a section is left out */
+  function pageDiffGroups(page) {
+    var sec = Store.sectionOf(page.id), auto = sec && page.settings && page.settings.autoNav !== false;
+    function st(key) { return function (p) { return (p.settings || {})[key]; }; }
+    function fixed(f) { return function () { return f; }; }
+    var groups = [
+      { prefix: '', fields: fixed([S.text('title', 'Page title')]), get: function (p) { return p; } },
+      { prefix: 'Heading', fields: fixed(pageSettingsSchema.heading), get: st('heading') },
+      { prefix: 'Breadcrumb', fields: fixed([S.list('breadcrumb', 'Link', linkFields)]), get: function (p) { return p.settings; } },
+      { prefix: 'Banner', fields: function (p) { return [S.select('type', 'Type', HERO_TYPES)].concat(heroSchemas[(p.hero || {}).type] || []); }, get: function (p) { return p.hero; } },
+      { prefix: 'Featured image', fields: fixed(pageSettingsSchema.featuredImage), get: st('featuredImage') },
+      { prefix: 'Related content', fields: fixed(pageSettingsSchema.relatedContent), get: st('relatedContent') },
+      { prefix: 'Side column buttons', fields: fixed(pageSettingsSchema.sectionCtas), get: st('sectionCtas') }
+    ];
+    if (!auto) groups.push(
+      { prefix: 'Contents', fields: fixed(pageSettingsSchema.inPageNav), get: st('inPageNav') },
+      { prefix: 'Side menu', fields: fixed(pageSettingsSchema.sectionNav), get: st('sectionNav') },
+      { prefix: 'Previous / next', fields: fixed(pageSettingsSchema.pageNav), get: st('pageNav') });
+    return groups;
+  }
+  function pageDiff(page) { return page && page.source && page.source.original ? RV.diffPage(page.source.original, page, { pageGroups: pageDiffGroups(page) }) : null; }
+
+  var renderChangesSoon = debounce(function () { renderChanges(); }, 350);
+  function renderChanges() {
+    var host = Preview.changesEl, page = App.page;
+    if (!host || !page) return;
+    var scroll = host.scrollTop;
+    host.innerHTML = '';
+    var src = page.source;
+    if (!src || !src.original) { host.appendChild(noOriginalPanel(page)); return; }
+    var diff = pageDiff(page), showAll = !!App.changesShowAll;
+    var allChk = el('input', { type: 'checkbox', checked: showAll });
+    allChk.addEventListener('change', function () { App.changesShowAll = allChk.checked; renderChanges(); });
+    var label = diff.total ? RV.countsLine(diff) : 'no changes yet';
+    host.appendChild(el('div', { class: 'changes__bar' }, [
+      el('div', { class: 'changes__summary' }, [
+        el('strong', { text: label.charAt(0).toUpperCase() + label.slice(1) }),
+        el('span', { class: 'small muted' }, ['Compared with ', src.url ? el('a', { href: src.url, target: '_blank', rel: 'noopener', text: 'the live page' }) : 'the original', ' as copied ' + fmtTime(src.importedAt)])
+      ]),
+      el('span', { class: 'spacer' }),
+      el('label', { class: 'check small' }, [allChk, el('span', { text: 'Show unchanged blocks' })]),
+      el('button', { class: 'btn btn--sm', type: 'button', title: 'Download the change list as a Word document', onclick: function () { exportChangeList([page], 'word'); } }, ['Word']),
+      el('button', { class: 'btn btn--sm', type: 'button', title: 'Print the change list or save it as a PDF', onclick: function () { exportChangeList([page], 'pdf'); } }, ['PDF']),
+      menuButton(null, originalMenuItems(page), { icon: 'more', title: 'Original page options' })
+    ]));
+    var doc = el('div', { class: 'cl-doc changes__list' });
+    if (diff.total || showAll) doc.innerHTML = RV.itemsHtml(diff, 'app', { showUnchanged: showAll });
+    else doc.appendChild(el('div', { class: 'empty' }, [el('p', { text: 'This page matches the original so far. Edits you make are listed here, ready to export as a change list for whoever updates the page in Jadu.' })]));
+    doc.addEventListener('click', function (e) { var b = e.target.closest('.cl-show'); if (b) showBlockInPage(b.getAttribute('data-block')); });
+    host.appendChild(doc);
+    host.scrollTop = scroll;
+  }
+  function showBlockInPage(id) {
+    if (Preview.setMode) Preview.setMode('preview');
+    App.selectedBlock = id; App.sideTab = 'block'; renderEditorSide();
+    setTimeout(function () { highlightBlock(id, true); }, 900);
+  }
+  function noOriginalPanel(page) {
+    var url = el('input', { class: 'input', type: 'url', placeholder: 'https://www.leeds.ac.uk/…', value: (page.source && page.source.url) || '', 'aria-label': 'Live page address' });
+    var msg = el('p', { class: 'small', role: 'status' });
+    function report(text, isError) { msg.className = 'small' + (isError ? ' error' : ' muted'); msg.textContent = text; }
+    return el('div', { class: 'changes__empty' }, [el('div', { class: 'panel' }, [
+      el('h2', { text: 'Nothing to compare with yet' }),
+      el('p', { text: 'Pages imported from leeds.ac.uk keep an untouched copy of the original. This view then lists every change against it, ready to hand to whoever edits the page in Jadu. This page has no original, either because it was imported before this feature or because it was made in the CMS.' }),
+      el('div', { class: 'field' }, [el('span', { class: 'field__label', text: 'Fetch the live page and use it as the original' }), el('div', { class: 'row' }, [url, el('button', { class: 'btn btn--primary', type: 'button', disabled: !isHttp, onclick: function () { fetchOriginal(page, url.value.trim(), report); } }, ['Fetch'])])]),
+      isHttp ? null : el('p', { class: 'small muted', text: 'Fetching needs the CMS to run from a web address, such as the Vercel site.' }),
+      el('div', { class: 'row' }, [el('button', { class: 'btn', type: 'button', onclick: function () { keepOriginal(page, url.value.trim()); markDirty(); renderChanges(); toast('The page as it is now is the original. Later edits are listed.', 'success', 4000); } }, ['Use the page as it is now']), el('span', { class: 'small muted', text: 'Every later edit is then listed.' })]),
+      msg
+    ])]);
+  }
+  function fetchOriginal(page, u, report) {
+    if (!/^https?:\/\//i.test(u)) { report('Enter the full address of the live page, starting https://', true); return; }
+    report('Fetching ' + u + '…');
+    IMP.fetchUrl(u).then(function (html) {
+      var r = IMP.parsePage(html, { baseUrl: u });
+      page.source = { url: u, importedAt: new Date().toISOString(), original: Store.clone({ title: r.page.title, template: r.page.template, settings: r.page.settings, hero: r.page.hero, blocks: r.page.blocks }) };
+      markDirty(); renderChanges(); toast('The live page is now the original', 'success');
+    }).catch(function (e) { report(e.message, true); });
+  }
+  function originalMenuItems(page) {
+    var src = page.source || {};
+    function report(text, isError) { toast(text, isError ? 'error' : 'info', isError ? 6000 : 2500); }
+    return [
+      src.url && isHttp ? { label: 'Fetch the live page again', onClick: function () { UI.confirm('Fetch the live page again', 'Replace the original with the live page as it is today? Changes are then listed against the new copy.', 'Fetch').then(function (ok) { if (ok) fetchOriginal(page, src.url, report); }); } } : null,
+      { label: 'Use the page as it is now as the original', onClick: function () { UI.confirm('Reset the original', 'Treat the page as it is now as the original? The current change list is cleared and only later edits are listed.', 'Reset').then(function (ok) { if (ok) { keepOriginal(page, src.url); markDirty(); renderChanges(); } }); } },
+      { label: 'Change the live page address', onClick: function () { UI.prompt('Live page address', 'Address of the page on leeds.ac.uk', src.url || '', 'Save').then(function (v) { if (v === null) return; page.source.url = v.trim(); markDirty(); renderChanges(); }); } },
+      '-',
+      { label: 'Forget the original', onClick: function () { UI.confirm('Forget the original', 'Remove the copy of the original page? The change list for this page goes with it.', 'Forget', true).then(function (ok) { if (ok) { delete page.source; markDirty(); renderChanges(); } }); } }
+    ].filter(Boolean);
+  }
+  function signoffText(pageId) {
+    var s = App.reviewSummary && App.reviewSummary[pageId];
+    if (!s || !s.status || s.status === 'not_started') return '';
+    return SIGNOFF[s.status].label + (s.by_email ? ' by ' + s.by_email : '') + (s.at ? ', ' + fmtTime(s.at) : '');
+  }
+  /* format: 'word' downloads a .doc; 'pdf' opens the print window, where "Save as PDF" keeps the text selectable */
+  function exportChangeList(pages, format, title) {
+    var sections = pages.filter(function (p) { return p.source && p.source.original; }).map(function (p) { return { page: p, diff: pageDiff(p), meta: { signoff: signoffText(p.id) } }; });
+    if (!sections.length) { toast('None of these pages has an original to compare with', 'warn'); return; }
+    var C = window.UOL_CLOUD, user = C && C.user();
+    var name = title || (pages.length === 1 ? 'Changes for Jadu: ' + pages[0].title : 'Changes for Jadu');
+    var html = RV.changeListDocument(sections, { title: name, by: user && user.email });
+    var file = 'changes-for-jadu-' + (pages.length === 1 ? pages[0].slug : Store.slugify(title || 'all-pages'));
+    M.inline(html).then(function (h) {
+      if (format === 'word') { X.download(new Blob(['﻿', h], { type: 'application/msword' }), file + '.doc'); toast('Change list downloaded', 'success'); return; }
+      printHtml(h);
+    });
+  }
+  function printHtml(html) {
+    var f = el('iframe', { class: 'print-frame', title: 'Change list for printing', 'aria-hidden': 'true', tabindex: '-1' });
+    f.addEventListener('load', function () {
+      setTimeout(function () {
+        try { f.contentWindow.focus(); f.contentWindow.print(); } catch (e) { toast('Could not open the print window: ' + e.message, 'error', 6000); }
+        setTimeout(function () { f.remove(); }, 60000);
+      }, 250);
+    });
+    f.srcdoc = html;
+    document.body.appendChild(f);
+    toast('In the print window, choose "Save as PDF" as the printer', 'info', 6000);
+  }
+
+  /* ---------- Check page ---------- */
+  function checkHtml(page) { var c = ctx(); return R.renderBody(c.site, page, { editor: true, pages: c.pages, sections: c.sections }); }
+  function runCheck(page) { return RV.checkPage(checkHtml(page), { slugs: Store.data.pages.map(function (p) { return p.slug; }) }); }
+  function liveUrl(path, page) {
+    var origin = 'https://www.leeds.ac.uk';
+    try { if (page.source && page.source.url) origin = new URL(page.source.url).origin; } catch (e) {}
+    return origin + path;
+  }
+  function whereText(i) {
+    var b = i.blockId ? findBlock(i.blockId) : null;
+    return b ? 'Block ' + (blockIndex(i.blockId) + 1) + ': ' + blockSpec(b).label : i.area;
+  }
+  function issueRow(i) {
+    var kids = [
+      el('span', { class: 'issue__icon', 'aria-hidden': 'true', text: i.level === 'error' ? '!' : 'i' }),
+      el('span', { class: 'issue__text' }, [el('span', { text: i.message }), el('span', { class: 'issue__where', text: whereText(i) })]),
+      i.src ? el('img', { class: 'issue__thumb', src: i.src, alt: '' }) : null
+    ];
+    if (!i.blockId) return el('div', { class: 'issue issue--' + i.level }, kids);
+    return el('button', { type: 'button', class: 'issue issue--' + i.level, title: 'Show this block in the preview', onclick: function () { App.selectedBlock = i.blockId; highlightBlock(i.blockId, true); } }, kids);
+  }
+  function linkList(title, items, hint, page, external) {
+    if (!items.length) return null;
+    var det = el('details', { class: 'linklist' }, [el('summary', { text: title + ' (' + items.length + ')' })]);
+    if (hint) det.appendChild(el('p', { class: 'small muted', text: hint }));
+    items.forEach(function (l) {
+      var href = external ? l.href : liveUrl(l.href, page);
+      det.appendChild(el('div', { class: 'linklist__row' }, [
+        el('span', { class: 'linklist__text' }, [el('span', { text: l.text || l.href }), el('span', { class: 'issue__where', text: (external ? l.href : l.href) + ' · ' + whereText(l) })]),
+        el('a', { class: 'btn btn--xs', href: href, target: '_blank', rel: 'noopener', title: 'Open in a new tab to check it', text: 'Open' })
+      ]));
+    });
+    return det;
+  }
+  function renderCheck(box) {
+    var page = App.page, res = runCheck(page);
+    if (!res.issues.length) box.appendChild(el('p', { class: 'check-ok small', text: 'No problems found. Images have alt text, headings are in order and links have text.' }));
+    res.issues.forEach(function (i) { box.appendChild(issueRow(i)); });
+    [linkList('Links to pages not in this project', res.offProject, 'Fine if the page exists on leeds.ac.uk. Open each one to make sure.', page, false),
+      linkList('Links to other websites', res.external, 'Open each one to check it still works and goes to the right place.', page, true)].forEach(function (n) { if (n) box.appendChild(n); });
+    return res;
+  }
+  function countPill(n, kind, text) { return el('span', { class: 'count-pill count-pill--' + kind, text: text || String(n) }); }
+
+  /* ---------- Sign-off and comments (cloud) ---------- */
+  var SIGNOFF = {
+    not_started: { label: 'Not started' },
+    in_review: { label: 'In review' },
+    changes_requested: { label: 'Changes requested' },
+    approved: { label: 'Approved' }
+  };
+  function cloudReady() { var C = window.UOL_CLOUD; return !!(C && C.configured() && C.link() && C.user()); }
+  function cloudNote() {
+    var C = window.UOL_CLOUD;
+    var text = !C || !C.configured() ? 'Sign-off and comments are saved in the cloud, so the whole team sees them. Cloud saving is not set up yet (see DEPLOY.md).'
+      : !C.link() ? 'Sign-off and comments are saved with the cloud project. Upload this project on the Cloud screen to use them.'
+      : 'Sign in on the Cloud screen to see sign-off and comments.';
+    return el('div', {}, [el('p', { class: 'small muted', text: text }), C && C.configured() ? el('a', { class: 'btn btn--sm', href: '#cloud' }, ['Open the Cloud screen']) : null]);
+  }
+  /* comments and sign-off history for the open page, kept while the editor is open */
+  function loadReview(force) {
+    var page = App.page, C = window.UOL_CLOUD;
+    if (!page || !cloudReady()) return Promise.resolve(null);
+    var r = App.review && App.review.pageId === page.id ? App.review : (App.review = { pageId: page.id, comments: [], history: [], loaded: false });
+    if (r.loading && !force) return r.loading;
+    r.loading = Promise.all([C.review.comments(page.id), C.review.signoffHistory(page.id)]).then(function (res) {
+      r.loading = null;
+      r.comments = res[0] || []; r.history = res[1] || []; r.loaded = true; r.error = ''; r.at = Date.now();
+      var s = r.history[0];
+      App.reviewSummary = App.reviewSummary || {};
+      App.reviewSummary[page.id] = { page_id: page.id, status: s ? s.status : null, by_email: s && s.by_email, at: s && s.at, content_hash: s && s.content_hash, open_comments: r.comments.filter(function (c) { return !c.resolved_at; }).length };
+      if (App.review === r) afterReviewLoad();
+      return r;
+    }, function (e) { r.loading = null; r.error = e.message; if (App.review === r) afterReviewLoad(); return r; });
+    return r.loading;
+  }
+  function pageReview() { return App.page && App.review && App.review.pageId === App.page.id ? App.review : null; }
+  function openCommentsFor(blockId) { var r = pageReview(); return r ? r.comments.filter(function (c) { return !c.resolved_at && (blockId === undefined || c.block_id === blockId); }).length : 0; }
+  function afterReviewLoad() {
+    if (App.view !== 'edit') return;
+    updateReviewBadge();
+    if (App.sideTab === 'review') { renderSignoff(); renderCommentList(); }
+    else if (App.sideTab === 'block' && blockListEl && !App.selectedBlock) rebuildOutlineRows();
+  }
+  function updateReviewBadge() {
+    var tab = sideEl && sideEl.querySelector('.tabs__tab[data-tab="review"]'); if (!tab) return;
+    var n = openCommentsFor(), b = tab.querySelector('.tabs__badge');
+    if (b) b.remove();
+    if (n) tab.appendChild(el('span', { class: 'tabs__badge', title: n + ' open comment' + (n === 1 ? '' : 's'), text: String(n) }));
+  }
+  /* while the Review tab is open, colleagues' comments arrive every 45 seconds */
+  setInterval(function () { if (App.view === 'edit' && App.sideTab === 'review' && document.visibilityState === 'visible' && cloudReady()) loadReview(true); }, 45000);
+
+  var reviewEls = null;
+  function renderReviewTab(body) {
+    var page = App.page;
+    reviewEls = {};
+    var so = section('Sign-off', true); reviewEls.signoff = so.body; body.appendChild(so.el);
+    var ch = section('Changes for Jadu', true); renderChangesSummary(ch.body); body.appendChild(ch.el);
+    var ck = section('Check page', true), res = renderCheck(ck.body);
+    ck.el.querySelector('summary').appendChild(res.errors ? countPill(res.errors, 'error', res.errors + ' to fix') : res.warnings ? countPill(res.warnings, 'warn', res.warnings + ' to look at') : countPill(0, 'ok', 'OK'));
+    body.appendChild(ck.el);
+    var cm = section('Comments', true);
+    reviewEls.comments = el('div', { class: 'comments' });
+    cm.body.appendChild(reviewEls.comments);
+    if (cloudReady()) cm.body.appendChild(commentComposer());
+    body.appendChild(cm.el);
+    renderSignoff(); renderCommentList();
+    if (cloudReady() && (!pageReview() || Date.now() - (App.review.at || 0) > 15000)) loadReview(true);
+    if (App.focusComment && reviewEls.commentInput) { App.focusComment = false; setTimeout(function () { reviewEls.commentInput.focus(); cm.el.scrollIntoView({ block: 'nearest' }); }, 0); }
+  }
+  function renderChangesSummary(box) {
+    var d = pageDiff(App.page);
+    box.appendChild(el('p', { class: 'small', text: !d ? 'No original to compare with yet.' : d.total ? 'Changed since the original: ' + RV.countsLine(d) + '.' : 'No changes from the original yet.' }));
+    box.appendChild(el('div', { class: 'row' }, [
+      el('button', { class: 'btn btn--sm', type: 'button', onclick: function () { if (Preview.setMode) Preview.setMode('changes'); } }, ['View changes']),
+      d && d.total ? el('button', { class: 'btn btn--sm', type: 'button', onclick: function () { exportChangeList([App.page], 'word'); } }, ['Word']) : null,
+      d && d.total ? el('button', { class: 'btn btn--sm', type: 'button', onclick: function () { exportChangeList([App.page], 'pdf'); } }, ['PDF']) : null
+    ]));
+  }
+  function renderSignoff() {
+    var box = reviewEls && reviewEls.signoff, page = App.page;
+    if (!box || !page) return;
+    box.innerHTML = '';
+    if (!cloudReady()) { box.appendChild(cloudNote()); return; }
+    var r = pageReview();
+    if (!r || !r.loaded) { box.appendChild(el('p', { class: 'small muted', text: r && r.error ? 'Could not load sign-off: ' + r.error : 'Loading…' })); return; }
+    var cur = r.history[0], status = cur ? cur.status : 'not_started';
+    var edited = !!(cur && status === 'approved' && cur.content_hash && cur.content_hash !== RV.contentHash(page));
+    box.appendChild(el('div', { class: 'signoff' }, [
+      el('span', { class: 'signoff__pill signoff__pill--' + status, text: SIGNOFF[status].label }),
+      el('span', { class: 'small muted', title: cur && cur.by_email ? cur.by_email : '', text: cur ? (status === 'approved' ? 'by ' : 'set by ') + who(cur.by_email) + ', ' + fmtTime(cur.at) : 'Not sent for review yet' })
+    ]));
+    if (cur && cur.note) box.appendChild(el('p', { class: 'signoff__note', text: cur.note }));
+    if (edited) box.appendChild(el('p', { class: 'notice notice--warn small', text: 'Edited since it was approved. Send it for review again so the approval covers the latest version.' }));
+    var acts = [];
+    if (status === 'in_review') { acts.push(signoffBtn('approved', 'Approve', true)); acts.push(signoffBtn('changes_requested', 'Request changes')); }
+    else acts.push(signoffBtn('in_review', status === 'not_started' ? 'Send for review' : 'Send for review again', status !== 'approved' || edited));
+    if (window.UOL_CLOUD.canEdit()) acts.push(el('button', { class: 'btn btn--sm', type: 'button', title: 'A read-only link for reviewers without an account', onclick: function () { shareLinkDialog('page'); } }, [icon('share', 16), ' Review link']));
+    box.appendChild(el('div', { class: 'row signoff__actions' }, acts));
+    if (r.history.length) {
+      var det = el('details', { class: 'linklist' }, [el('summary', { text: 'History (' + r.history.length + ')' })]);
+      r.history.forEach(function (h) {
+        det.appendChild(el('div', { class: 'linklist__row' }, [el('span', { class: 'linklist__text' }, [
+          el('span', { text: SIGNOFF[h.status].label + ' · ' + who(h.by_email) }),
+          el('span', { class: 'issue__where', title: h.by_email || '', text: fmtTime(h.at) + (h.note ? ' · ' + h.note : '') })
+        ])]));
+      });
+      box.appendChild(det);
+    }
+  }
+  function signoffBtn(status, label, primary) { return el('button', { class: 'btn btn--sm' + (primary ? ' btn--primary' : ''), type: 'button', onclick: function () { signoffDialog(status); } }, [label]); }
+  function signoffDialog(status) {
+    var page = App.page, C = window.UOL_CLOUD;
+    var titles = { in_review: 'Send for review', approved: 'Approve this page', changes_requested: 'Request changes' };
+    var intro = {
+      in_review: 'Everyone the project is shared with can then approve "' + page.title + '" or ask for changes. For a reviewer without an account, also share a review link.',
+      approved: 'Records that you approved "' + page.title + '" as it is now, with your name and the time. If the page is edited afterwards, the Review tab says so.',
+      changes_requested: 'Sends "' + page.title + '" back with your note. Comments on particular blocks help too.'
+    }[status];
+    var note = el('textarea', { class: 'input', rows: 3, placeholder: status === 'changes_requested' ? 'What needs to change?' : 'Optional note' });
+    var errors = status === 'approved' ? runCheck(page).errors : 0;
+    var count = status === 'approved' ? openCommentsFor() : 0;
+    UI.modal({ title: titles[status], body: el('div', {}, [
+      el('p', { class: 'small', text: intro }),
+      errors ? el('p', { class: 'notice notice--warn small', text: 'Check page found ' + errors + ' problem' + (errors === 1 ? '' : 's') + ' to fix. You can still approve.' }) : null,
+      count ? el('p', { class: 'notice notice--warn small', text: count + ' comment' + (count === 1 ? ' is' : 's are') + ' still open.' }) : null,
+      el('label', { class: 'field' }, [el('span', { class: 'field__label', text: status === 'changes_requested' ? 'What needs to change' : 'Note (optional)' }), note])
+    ]), buttons: [{ label: 'Cancel' }, { label: titles[status], primary: true, onClick: function () {
+      if (status === 'changes_requested' && !note.value.trim()) { note.focus(); return false; }
+      if (App.dirty) saveNow();
+      C.review.setSignoff(page.id, status, note.value, RV.contentHash(page)).then(function () {
+        toast({ in_review: 'Sent for review', approved: 'Approved', changes_requested: 'Changes requested' }[status], 'success');
+        loadReview(true);
+      }, cloudError);
+    } }] });
+  }
+  function renderCommentList() {
+    var box = reviewEls && reviewEls.comments, page = App.page;
+    if (!box || !page) return;
+    box.innerHTML = '';
+    if (!cloudReady()) { box.appendChild(el('p', { class: 'small muted', text: 'Comments are saved in the cloud too (see Sign-off above).' })); return; }
+    var r = pageReview();
+    if (!r || !r.loaded) { box.appendChild(el('p', { class: 'small muted', text: r && r.error ? 'Could not load comments: ' + r.error : 'Loading…' })); return; }
+    var open = r.comments.filter(function (c) { return !c.resolved_at; });
+    var shown = App.commentsAll ? r.comments : open;
+    if (r.comments.length) {
+      box.appendChild(el('div', { class: 'chips comments__filter', role: 'group', 'aria-label': 'Which comments' }, [
+        el('button', { type: 'button', class: 'chip' + (App.commentsAll ? '' : ' is-active'), 'aria-pressed': App.commentsAll ? 'false' : 'true', onclick: function () { App.commentsAll = false; renderCommentList(); } }, ['Open (' + open.length + ')']),
+        el('button', { type: 'button', class: 'chip' + (App.commentsAll ? ' is-active' : ''), 'aria-pressed': App.commentsAll ? 'true' : 'false', onclick: function () { App.commentsAll = true; renderCommentList(); } }, ['All (' + r.comments.length + ')'])
+      ]));
+    }
+    if (!shown.length) box.appendChild(el('p', { class: 'small muted', text: r.comments.length ? 'No open comments. Everything has been resolved.' : 'No comments yet. Comment on the page, or pick a block in the preview to comment on it.' }));
+    shown.forEach(function (c) { box.appendChild(commentCard(c)); });
+  }
+  function commentCard(c) {
+    var C = window.UOL_CLOUD, me = C.user(), l = C.link();
+    var mine = !!(me && c.author_id === me.id), b = c.block_id ? findBlock(c.block_id) : null;
+    var target = null;
+    if (c.block_id) target = b
+      ? el('button', { type: 'button', class: 'comment__target', title: 'Show this block in the preview', onclick: function () { App.selectedBlock = c.block_id; highlightBlock(c.block_id, true); } }, ['Block ' + (blockIndex(c.block_id) + 1) + ': ' + blockSpec(b).label])
+      : el('span', { class: 'comment__target is-gone', text: 'On a block that was removed' + (c.block_label ? ': ' + clipText(c.block_label, 40) : '') });
+    var acts = [];
+    if (mine || (l && l.role !== 'viewer')) acts.push(el('button', { type: 'button', class: 'btn btn--xs', onclick: function () { C.review.resolveComment(c.id, !c.resolved_at).then(function () { loadReview(true); }, cloudError); } }, [c.resolved_at ? 'Reopen' : 'Resolve']));
+    if (mine || (l && l.role === 'owner')) acts.push(el('button', { type: 'button', class: 'btn btn--xs btn--danger-ghost', onclick: function () { UI.confirm('Delete comment', 'Delete this comment for everyone?', 'Delete', true).then(function (ok) { if (ok) C.review.deleteComment(c.id).then(function () { loadReview(true); }, cloudError); }); } }, ['Delete']));
+    return el('div', { class: 'comment' + (c.resolved_at ? ' is-resolved' : '') }, [
+      el('div', { class: 'comment__head' }, [el('strong', { title: c.author_email || '', text: mine ? 'You' : who(c.author_email) }), el('span', { class: 'small muted', text: fmtTime(c.created_at) })]),
+      target,
+      el('div', { class: 'comment__body', text: c.body }),
+      c.resolved_at ? el('div', { class: 'small muted', text: 'Resolved by ' + who(c.resolved_by_email) + ', ' + fmtTime(c.resolved_at) }) : null,
+      acts.length ? el('div', { class: 'comment__actions' }, acts) : null
+    ]);
+  }
+  function commentComposer() {
+    var page = App.page, C = window.UOL_CLOUD;
+    var ta = el('textarea', { class: 'input', rows: 3, placeholder: 'Add a comment… (Ctrl+Enter to post)', 'aria-label': 'New comment' });
+    ta.value = App.commentDraft || '';
+    ta.addEventListener('input', function () { App.commentDraft = ta.value; });
+    var target = el('select', { class: 'input input--sm', 'aria-label': 'What the comment is about' }, [option('', 'The whole page')].concat(page.blocks.map(function (b, i) {
+      var s = blockSummary(b); return option(b.id, 'Block ' + (i + 1) + ': ' + blockSpec(b).label + (s ? ' · ' + clipText(s, 30) : ''));
+    })));
+    target.value = App.commentTarget && findBlock(App.commentTarget) ? App.commentTarget : '';
+    target.addEventListener('change', function () { App.commentTarget = target.value; if (target.value) highlightBlock(target.value, true); });
+    var post = el('button', { class: 'btn btn--primary btn--sm', type: 'button', onclick: send }, ['Comment']);
+    function send() {
+      var text = ta.value.trim(); if (!text) { ta.focus(); return; }
+      var bid = target.value, b = bid ? findBlock(bid) : null;
+      post.disabled = true;
+      C.review.addComment(page.id, bid, b ? blockSpec(b).label + (blockSummary(b) ? ': ' + clipText(blockSummary(b), 120) : '') : '', text).then(function () {
+        ta.value = ''; App.commentDraft = ''; post.disabled = false; loadReview(true);
+      }, function (e) { post.disabled = false; cloudError(e); });
+    }
+    ta.addEventListener('keydown', function (e) { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); send(); } });
+    reviewEls.commentInput = ta; reviewEls.commentTarget = target;
+    return el('div', { class: 'comment-new' }, [ta, el('div', { class: 'comment-new__row' }, [target, post])]);
+  }
+  /* picking a block while the Review tab is open makes it the subject of the next comment */
+  function setCommentTarget(id) {
+    App.commentTarget = id || '';
+    if (reviewEls && reviewEls.commentTarget && reviewEls.commentTarget.isConnected) reviewEls.commentTarget.value = id && findBlock(id) ? id : '';
+  }
+  function commentOnBlock(id) { App.commentTarget = id; App.focusComment = true; App.sideTab = 'review'; App.selectedBlock = id; renderEditorSide(); highlightBlock(id, true); }
+
+  /* sign-off and open comments in the Pages table */
+  function fillSignoffChips(root) {
+    if (!cloudReady()) return;
+    var C = window.UOL_CLOUD;
+    var fresh = App.reviewSummaryAt && Date.now() - App.reviewSummaryAt < 30000;
+    (fresh ? Promise.resolve(null) : C.review.summary().then(function (rows) { App.reviewSummary = {}; (rows || []).forEach(function (r) { App.reviewSummary[r.page_id] = r; }); App.reviewSummaryAt = Date.now(); })).then(function () {
+      root.querySelectorAll('[data-signoff]').forEach(function (td) {
+        td.querySelectorAll('.signoff__pill, .comment-count').forEach(function (n) { n.remove(); });
+        var s = App.reviewSummary && App.reviewSummary[td.getAttribute('data-signoff')], p = Store.getPage(td.getAttribute('data-signoff'));
+        if (!s || !p) return;
+        if (s.status && s.status !== 'not_started') {
+          var edited = s.status === 'approved' && s.content_hash && s.content_hash !== RV.contentHash(p);
+          td.appendChild(el('span', { class: 'signoff__pill signoff__pill--sm signoff__pill--' + (edited ? 'changes_requested' : s.status), title: SIGNOFF[s.status].label + (s.by_email ? ' by ' + s.by_email : '') + (s.at ? ', ' + fmtTime(s.at) : '') + (edited ? '. Edited since.' : ''), text: edited ? 'Edited since approval' : SIGNOFF[s.status].label }));
+        }
+        if (s.open_comments) td.appendChild(el('span', { class: 'comment-count', title: s.open_comments + ' open comment' + (s.open_comments === 1 ? '' : 's'), text: s.open_comments + ' comment' + (s.open_comments === 1 ? '' : 's') }));
+      });
+    }).catch(function () {});
+  }
+
+  /* ---------- review links: a fixed copy for people without an account ---------- */
+  function parseScope(scope) { var m = /^(page|section):(.+)$/.exec(scope || ''); return m ? { kind: m[1], id: m[2] } : { kind: 'project' }; }
+  function shareData(scope) {
+    var d = Store.data, s = parseScope(scope), pages, sections;
+    if (s.kind === 'page') { var p = Store.getPage(s.id); if (!p) throw new Error('That page no longer exists'); pages = [p]; var ps = Store.sectionOf(p.id); sections = ps ? [ps] : []; }
+    else if (s.kind === 'section') { var sec = Store.getSection(s.id); if (!sec) throw new Error('That section no longer exists'); pages = Store.sectionPages(sec.id); sections = [sec]; }
+    else { pages = d.pages; sections = d.sections; }
+    var ids = {}; pages.forEach(function (p) { ids[p.id] = 1; });
+    var user = window.UOL_CLOUD.user();
+    return {
+      site: Store.clone(d.site),
+      pages: pages.map(function (p) { var c = Store.clone(p); delete c.revisions; delete c.source; return c; }),
+      sections: Store.clone(sections).map(function (x) { x.pages = (x.pages || []).filter(function (id) { return ids[id]; }); return x; }),
+      madeAt: new Date().toISOString(), madeBy: user ? user.email : ''
+    };
+  }
+  function reviewUrl(token, scope) {
+    var base = location.href.replace(/[#?].*$/, '').replace(/[^/]*$/, '');
+    var s = parseScope(scope), p = s.kind === 'page' ? Store.getPage(s.id) : null;
+    return base + 'review.html#' + token + (p ? '/' + p.slug : '');
+  }
+  function scopeText(r) {
+    var s = parseScope(r.scope);
+    if (s.kind === 'page') { var p = Store.getPage(s.id); return 'Page: ' + (p ? p.title : 'deleted page'); }
+    if (s.kind === 'section') { var sec = Store.getSection(s.id); return 'Section: ' + (sec ? sec.title : 'deleted section') + ' (' + r.page_count + ' page' + (r.page_count === 1 ? '' : 's') + ')'; }
+    return 'Whole project (' + r.page_count + ' page' + (r.page_count === 1 ? '' : 's') + ')';
+  }
+  function imageProgress(i, n) { toast('Copying images for reviewers: ' + i + ' of ' + n, 'info', 1500); }
+  function shareLinkDialog(defaultKind) {
+    var C = window.UOL_CLOUD, l = C && C.link(), page = App.view === 'edit' ? App.page : null;
+    if (!cloudReady()) { toast('Review links need the cloud: upload this project and sign in on the Cloud screen first', 'warn', 6000); return; }
+    if (!C.canEdit()) { toast('Only the owner or an editor can make review links', 'warn'); return; }
+    var sec = page ? Store.sectionOf(page.id) : null;
+    var scope = el('select', { class: 'input', 'aria-label': 'What to share' }, [
+      page ? option('page:' + page.id, 'This page: ' + page.title) : null,
+      sec ? option('section:' + sec.id, 'Its section: ' + sec.title + ' (' + sec.pages.length + ' pages)') : null,
+      option('project', 'The whole project (' + Store.data.pages.length + ' pages)')
+    ].filter(Boolean));
+    scope.value = defaultKind === 'page' && page ? 'page:' + page.id : defaultKind === 'section' && sec ? 'section:' + sec.id : 'project';
+    var name = el('input', { class: 'input', type: 'text', 'aria-label': 'Name' });
+    function defName() { var s = parseScope(scope.value); return s.kind === 'page' ? page.title : s.kind === 'section' ? sec.title : l.name; }
+    name.value = defName();
+    scope.addEventListener('change', function () { name.value = defName(); });
+    var msg = el('p', { class: 'small', role: 'alert' });
+    UI.modal({ title: 'Share a review link', body: el('div', {}, [
+      el('p', { class: 'small', text: 'Anyone with the link can view a copy of the pages as they are now, without an account. Later edits only show once you update the link on the Cloud screen. Reviewers cannot edit or comment, and see nothing else in the project.' }),
+      el('label', { class: 'field' }, [el('span', { class: 'field__label', text: 'What to share' }), scope]),
+      el('label', { class: 'field' }, [el('span', { class: 'field__label', text: 'Name shown to reviewers' }), name]),
+      msg
+    ]), buttons: [{ label: 'Cancel' }, { label: 'Create link', primary: true, onClick: function (api) {
+      var data; try { data = shareData(scope.value); } catch (e) { msg.className = 'small error'; msg.textContent = e.message; return false; }
+      if (App.dirty) saveNow();
+      msg.className = 'small muted'; msg.textContent = 'Creating the link…';
+      var sc = scope.value;
+      C.shares.create(name.value.trim() || defName(), sc, data, imageProgress).then(function (token) { api.close(); linkReadyDialog(reviewUrl(token, sc), name.value.trim() || defName()); }, function (e) { msg.className = 'small error'; msg.textContent = e.message; });
+      return false;
+    } }] });
+  }
+  function linkReadyDialog(url, name) {
+    var input = el('input', { class: 'input input--mono', type: 'text', readonly: true, value: url, 'aria-label': 'Review link' });
+    UI.modal({ title: 'Review link ready', body: el('div', {}, [
+      el('p', { class: 'small', text: 'Send this link to reviewers. It shows "' + name + '" as it is now. Manage or remove it on the Cloud screen.' }),
+      el('div', { class: 'row' }, [input, el('button', { class: 'btn btn--primary', type: 'button', onclick: function () { X.copyText(url).then(function () { toast('Link copied', 'success'); }); } }, ['Copy']), el('a', { class: 'btn', href: url, target: '_blank', rel: 'noopener' }, ['Open'])]),
+      isHttp ? null : el('p', { class: 'small muted', text: 'This CMS is open from a file, so the link only works on this computer. Make links from the CMS\'s web address (the Vercel site) to send them to others.' })
+    ]), buttons: [{ label: 'Done', primary: true }] });
+    setTimeout(function () { input.select(); }, 50);
+  }
+  function reviewLinksPanel() {
+    var C = window.UOL_CLOUD, box = el('div', {}, [el('p', { class: 'small muted', text: 'Loading…' })]);
+    function load() {
+      C.shares.list().then(function (rows) {
+        box.innerHTML = '';
+        if (!rows || !rows.length) { box.appendChild(el('p', { class: 'small muted', text: 'No review links yet.' })); return; }
+        rows.forEach(function (r) {
+          var url = reviewUrl(r.token, r.scope);
+          box.appendChild(el('div', { class: 'rev' }, [
+            el('div', {}, [el('strong', { text: r.name }), el('div', { class: 'small muted', text: scopeText(r) + ' · copy from ' + fmtTime(r.updated_at) + (r.created_by_email ? ' · made by ' + who(r.created_by_email) : '') })]),
+            el('div', {}, [
+              el('button', { class: 'btn btn--xs', type: 'button', onclick: function () { X.copyText(url).then(function () { toast('Link copied', 'success'); }); } }, ['Copy link']),
+              el('a', { class: 'btn btn--xs', href: url, target: '_blank', rel: 'noopener' }, ['Open']),
+              el('button', { class: 'btn btn--xs', type: 'button', title: 'Replace the copy with the pages as they are now; the link stays the same', onclick: function () {
+                var data; try { data = shareData(r.scope); } catch (e) { cloudError(e); return; }
+                if (App.dirty) saveNow();
+                C.shares.update(r.token, data, imageProgress).then(function () { toast('"' + r.name + '" now shows the latest version', 'success'); load(); }, cloudError);
+              } }, ['Update']),
+              el('button', { class: 'btn btn--xs btn--danger-ghost', type: 'button', onclick: function () { UI.confirm('Delete review link', 'Delete "' + r.name + '"? The link stops working for everyone who has it.', 'Delete', true).then(function (ok) { if (ok) C.shares.remove(r.token).then(function () { toast('Review link deleted', 'info'); load(); }, cloudError); }); } }, ['Delete'])
+            ])
+          ]));
+        });
+      }, function (e) { box.innerHTML = ''; box.appendChild(el('p', { class: 'error small', text: 'Could not load review links: ' + e.message })); });
+    }
+    load();
+    return el('div', { class: 'panel' }, [
+      el('h2', { text: 'Review links' }),
+      el('p', { class: 'small', text: 'Read-only copies for reviewers without an account. Each link shows the pages as they were when it was made or last updated.' }),
+      el('div', { class: 'row' }, [el('button', { class: 'btn btn--sm', type: 'button', onclick: function () { shareLinkDialog('project'); } }, [icon('share', 16), ' New review link'])]),
+      box
+    ]);
+  }
+  /* change lists for every page that has an original, on Save and export */
+  function changeListPanel() {
+    var withOriginal = Store.data.pages.filter(function (p) { return p.source && p.source.original; });
+    var rows = el('div', { class: 'table' });
+    withOriginal.forEach(function (p) {
+      var d = pageDiff(p);
+      rows.appendChild(el('div', { class: 'table__row' }, [
+        el('div', {}, [el('a', { href: '#edit/' + p.id, text: p.title }), el('div', { class: 'small muted', text: d.total ? RV.countsLine(d) : 'no changes' })]),
+        el('div', { class: 'row' }, [
+          el('button', { class: 'btn btn--sm', type: 'button', disabled: !d.total, onclick: function () { exportChangeList([p], 'word'); } }, ['Word']),
+          el('button', { class: 'btn btn--sm', type: 'button', disabled: !d.total, onclick: function () { exportChangeList([p], 'pdf'); } }, ['PDF'])
+        ])
+      ]));
+    });
+    var changed = withOriginal.filter(function (p) { return pageDiff(p).total; });
+    return el('div', { class: 'panel' }, [
+      el('h2', { text: 'Changes for Jadu' }),
+      el('p', { class: 'small muted', text: 'Change lists against the original of each imported page: what to add, remove and edit in Jadu, with the text differences marked. PDF opens the print window; choose "Save as PDF".' }),
+      withOriginal.length ? rows : el('p', { class: 'small muted', text: 'No page has an original yet. Pages imported from now on keep one; for older pages, open the page and choose Changes in the top bar.' }),
+      changed.length > 1 ? el('div', { class: 'row' }, [
+        el('button', { class: 'btn btn--primary', type: 'button', onclick: function () { exportChangeList(changed, 'word', 'Changes for Jadu: ' + (Store.data.site.name || 'all pages')); } }, ['All changed pages as Word']),
+        el('button', { class: 'btn', type: 'button', onclick: function () { exportChangeList(changed, 'pdf', 'Changes for Jadu: ' + (Store.data.site.name || 'all pages')); } }, ['All changed pages as PDF'])
+      ]) : null,
+      Store.data.pages.length > withOriginal.length ? el('p', { class: 'small muted', text: (Store.data.pages.length - withOriginal.length) + ' page' + (Store.data.pages.length - withOriginal.length === 1 ? ' has' : 's have') + ' no original to compare with.' }) : null
+    ]);
   }
 
   /* ---------- import a section into the current page ---------- */
@@ -1513,6 +2059,7 @@
     var pages = parsed.map(function (x) {
       var page = createFromParsed(x.r, slugFromUrl(x.url, x.r.page.title));
       if (x.label && x.r.page.template !== 'homepage' && !(x.r.page.settings.heading && x.r.page.settings.heading.title)) page.title = x.label;
+      keepOriginal(page, x.url);
       Store.addToSection(page.id, sec.id);
       return page;
     });
@@ -1556,7 +2103,7 @@
       ]));
       var secSel = el('select', { class: 'input input--sm' }, [el('option', { value: '', text: 'No section' })].concat(Store.data.sections.map(function (s) { return el('option', { value: s.id, text: 'Add to section: ' + s.title }); })));
       status.appendChild(el('div', { class: 'row' }, [
-        el('button', { class: 'btn btn--primary', type: 'button', onclick: function (e) { e.target.disabled = true; localiseImages(r.page, pendingAssets).then(function (p) { r.page = p; var page = createFromParsed(r, r.slugBase); if (chromeChk.checked) applyChrome(r.site); if (secSel.value) Store.addToSection(page.id, secSel.value); Store.touch(page); toast('Page imported', 'success'); go('#edit/' + page.id); }); } }, ['Create page' + (chromeChk.checked && siteBits.length ? ' and apply site chrome' : '')]),
+        el('button', { class: 'btn btn--primary', type: 'button', onclick: function (e) { e.target.disabled = true; localiseImages(r.page, pendingAssets).then(function (p) { r.page = p; var page = createFromParsed(r, r.slugBase); keepOriginal(page, r.sourceUrl); if (chromeChk.checked) applyChrome(r.site); if (secSel.value) Store.addToSection(page.id, secSel.value); Store.touch(page); toast('Page imported', 'success'); go('#edit/' + page.id); }); } }, ['Create page' + (chromeChk.checked && siteBits.length ? ' and apply site chrome' : '')]),
         secSel,
         App.lastEditedPage ? el('button', { class: 'btn', type: 'button', onclick: function () { var p = Store.getPage(App.lastEditedPage); if (!p) return; r.page.blocks.forEach(function (b) { p.blocks.push(b); }); Store.touch(p); toast('Blocks appended to "' + p.title + '"', 'success'); go('#edit/' + p.id); } }, ['Append blocks to last edited page']) : null
       ]));
@@ -1586,7 +2133,7 @@
           if (obj.page) { var p = obj.page; showResult({ page: { title: p.title, template: p.template, settings: p.settings, hero: p.hero, blocks: p.blocks }, site: {}, warnings: [] }); return; }
           if (obj.site && obj.pages) { beforeReplaceAll('Import a whole project').then(function (ok) { if (!ok) return; Store.importJson(text).then(function () { toast('Project imported (' + obj.pages.length + ' pages)', 'success'); go('#pages'); }); }); return; }
         }
-        var r = IMP.parsePage(text, { baseUrl: base }); r.slugBase = slugFromUrl(base, r.page.title); showResult(r);
+        var r = IMP.parsePage(text, { baseUrl: base }); r.slugBase = slugFromUrl(base, r.page.title); r.sourceUrl = base || ''; showResult(r);
       } catch (e) { status.innerHTML = ''; status.appendChild(el('p', { class: 'error', text: 'Import failed: ' + e.message })); }
     }
     function fetchMany(list) {
@@ -1604,7 +2151,7 @@
       baseUrl.value = msg.url || '';
       if (msg.kind === 'section' && msg.pages) { showBatchResult(msg); }
       else if (msg.kind === 'page') { ta.value = ''; fromText(msg.html, msg.url); pendingAssets = msg.assets || null; }
-      else { ta.value = msg.html; var r = IMP.parseSection(msg.html, { baseUrl: msg.url }); showResult({ page: { title: (msg.title || 'Imported section').replace(/\s*[|–-]\s*University of Leeds.*$/i, ''), template: 'document', settings: window.UOL_PAGE_TEMPLATES.blank().settings, hero: { type: 'none' }, blocks: r.blocks }, site: {}, warnings: r.warnings, slugBase: slugFromUrl(msg.url, '') }); pendingAssets = msg.assets || null; }
+      else { ta.value = msg.html; var r = IMP.parseSection(msg.html, { baseUrl: msg.url }); showResult({ page: { title: (msg.title || 'Imported section').replace(/\s*[|–-]\s*University of Leeds.*$/i, ''), template: 'document', settings: window.UOL_PAGE_TEMPLATES.blank().settings, hero: { type: 'none' }, blocks: r.blocks }, site: {}, warnings: r.warnings, slugBase: slugFromUrl(msg.url, ''), sourceUrl: msg.url || '' }); pendingAssets = msg.assets || null; }
       if (msg.assets && Object.keys(msg.assets).length) status.appendChild(el('p', { class: 'small muted', text: Object.keys(msg.assets).length + ' original images came with the page and will be saved to the media library.' }));
       status.scrollIntoView({ behavior: 'smooth', block: 'center' });
       toast('Received ' + (msg.kind === 'section' ? (msg.pages || []).length + ' pages' : msg.kind === 'pick' ? 'a section' : msg.kind === 'main' ? 'page content' : 'a page') + ' from the grabber', 'success', 4000);
@@ -1718,6 +2265,7 @@
         pageRows,
         el('div', { class: 'row' }, [el('button', { class: 'btn btn--primary', type: 'button', onclick: function () { busy('Building ZIP…', X.exportSiteZip(c)); } }, ['Export whole site as ZIP'])])
       ]),
+      changeListPanel(),
       el('div', { class: 'panel panel--danger' }, [
         el('h2', { text: 'Start again' }),
         el('div', { class: 'row' }, [el('button', { class: 'btn btn--danger-ghost', type: 'button', onclick: function () { UI.confirm('Reset project', 'Replace everything with the sample site? Take a snapshot or save to a file first if you want to keep your work.', 'Reset everything', true).then(function (ok) { return ok && beforeReplaceAll('Reset project'); }).then(function (ok) { if (ok) { Store.reset(); App.undo = {}; App.redo = {}; toast('Project reset', 'info'); go('#pages'); } }); } }, ['Reset to sample site'])])
@@ -1797,6 +2345,7 @@
           el('button', { class: 'btn btn--sm btn--danger-ghost', type: 'button', onclick: function () { UI.confirm('Disconnect', 'Stop syncing this browser with "' + l.name + '"? Your copy stays here and the cloud project is not changed.', 'Disconnect').then(function (ok) { if (ok) { C.disconnect(); toast('Disconnected. Work stays in this browser.', 'info'); route(); } }); } }, ['Disconnect'])
         ])
       ]));
+      if (C.canEdit()) wrap.appendChild(reviewLinksPanel());
     } else {
       var name = el('input', { class: 'input', type: 'text', value: (Store.data.site && Store.data.site.name) || 'Leeds prototype', 'aria-label': 'Cloud project name' });
       wrap.appendChild(el('div', { class: 'panel panel--cloud' }, [
@@ -1936,6 +2485,7 @@
         '<h2>Images</h2><p>Every image field has <strong>Library</strong>, <strong>Upload</strong> and placeholder buttons, and accepts a dropped file. The rich text toolbar has an Image button too. Images live in the Media library (browser database, and your project folder when linked), not inside the page, so the project stays small.</p>' +
         '<h2>Saving</h2><p>Autosave is always on. For safety, <strong>link a project folder</strong> (Save &amp; export): project.json and images are written there after every change. You can also save <strong>versions</strong> of a page (Ctrl+S), take whole-project <strong>snapshots</strong>, and <strong>save a project file</strong> (Ctrl+Shift+S).</p>' +
         '<h2>Cloud and sharing</h2><p>Once cloud saving is set up (see <code>DEPLOY.md</code>), the <strong>Cloud</strong> screen lets you sign in, upload this project, and share it with colleagues to view or edit. Changes are saved here first and uploaded a few seconds later; colleagues\' changes arrive every minute. Different pages edited at the same time are merged; if two people change the same page, the more recent edit is kept and the other person is told. The chip next to <strong>Saved</strong> in the top bar shows the cloud state, and <strong>Earlier copies</strong> on the Cloud screen restores an hourly cloud copy.</p>' +
+        '<h2>Review and sign-off</h2><ul><li><strong>Changes</strong> in the editor\'s top bar lists everything changed since the original leeds.ac.uk page: blocks added, removed, edited and moved, with the text differences marked. Imported pages keep an untouched copy of the original for this; for other pages, fetch the live page or use the page as it is now. <strong>Word</strong> and <strong>PDF</strong> turn it into a change list for whoever edits the page in Jadu. Save &amp; export has change lists for every page.</li><li>The <strong>Review</strong> tab in the inspector checks the page (alt text, heading levels, link text, links to missing pages and other websites), shows the sign-off status and holds comments. Click a block in the preview while on the Review tab to comment on that block.</li><li><strong>Sign-off</strong>: send a page for review; anyone the project is shared with can approve it or request changes. Each step records who and when, and the tab says if the page was edited after it was approved. Sign-off and comments are saved in the cloud.</li><li><strong>Review links</strong> (editor &#8943; menu, Review tab or Cloud screen) give reviewers without an account a read-only copy of a page, a section or the whole project. Update a link on the Cloud screen to show the latest version.</li></ul>' +
         '<h2>Keyboard shortcuts</h2><ul><li><kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Y</kbd> undo / redo (outside text fields)</li><li><kbd>/</kbd> open the block inserter (outside text fields)</li><li><kbd>Ctrl</kbd>+<kbd>K</kbd> insert a link while editing rich text</li><li><kbd>Ctrl</kbd>+<kbd>S</kbd> save a version of the page</li><li><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd> save the project to file</li><li><kbd>Esc</kbd> close dialogs / cancel in-place editing</li></ul>' +
         '<h2>Linking pages</h2><p>Give links the path of another page in this project (for example <code>/about</code>) and they navigate between pages in the viewer and in HTML exports.</p>' +
         '<h2>Fonts</h2><p>Freight fonts load from Adobe Fonts when you are online; otherwise the design system fallback fonts are used.</p>'
@@ -1948,6 +2498,7 @@
     App.data = Store.load();
     App.lastSaved = new Date();
     buildRail();
+    document.head.appendChild(el('style', { text: RV.css }));
     document.addEventListener('keydown', function (e) {
       var tag = (e.target.tagName || '').toLowerCase();
       var typing = tag === 'input' || tag === 'textarea' || tag === 'select' || e.target.isContentEditable;

@@ -200,6 +200,23 @@ The extension and the bookmarklet send pages to `https://jadutrackchange.vercel.
 
 ---
 
+## Part 6: Sign-off, comments and review links
+
+These features keep their data in Supabase, so the database needs the extra tables and functions in the latest `supabase/setup.sql`.
+
+1. On GitHub, open `supabase/setup.sql` and copy the whole file.
+2. In Supabase, go to **SQL Editor**, click **New query**, paste it in and click **Run**. It should say "Success. No rows returned".
+
+Running the file again is safe: it only adds what is missing and keeps every project, image and account. It also creates a second storage bucket, `cms-shares`, which holds the images in review links.
+
+Then, in the editor:
+
+- **Changes** in the top bar lists what changed since the original leeds.ac.uk page, with **Word** and **PDF** change lists for Jadu.
+- The **Review** tab on the right checks the page, and holds sign-off and comments.
+- **Share a review link** in the ⋯ menu makes a read-only link for reviewers without an account. Manage links on the **Cloud** screen.
+
+---
+
 ## Troubleshooting
 
 | What you see | What to do |
@@ -212,6 +229,8 @@ The extension and the bookmarklet send pages to `https://jadutrackchange.vercel.
 | "Wrong key in cloud-config.js" | A secret key was pasted. Replace it with the publishable key and create a new secret key in Supabase. |
 | Everything stopped working after a quiet week | The free Supabase project paused. Open the Supabase dashboard and click **Restore project**. |
 | Import by URL fails online | Only leeds.ac.uk addresses are allowed. Use the grabber or paste the HTML for anything else. |
+| "The cloud database needs an update for this feature" | Run the whole of `supabase/setup.sql` again (Part 6). |
+| A review link says it does not work | The link was deleted, or only part of it was copied. Copy it again from the Cloud screen. |
 
 ## What the new files do
 
@@ -219,9 +238,11 @@ The extension and the bookmarklet send pages to `https://jadutrackchange.vercel.
 |---|---|
 | `vercel.json` | Tells Vercel to serve the folder as it is, and routes `/__proxy` to the import proxy. |
 | `api/proxy.js` | Online version of the local server's proxy. It fetches leeds.ac.uk pages and images for **Import by URL** and image exports. |
-| `supabase/setup.sql` | Creates the tables, access rules, sharing functions, hourly history and the image bucket. |
+| `supabase/setup.sql` | Creates the tables, access rules, sharing functions, hourly history, comments, sign-off, review links and the two image buckets. |
 | `assets/cms/cloud-config.js` | The two values from Supabase. Empty means cloud saving is off. |
-| `assets/cms/cloud.js` | Sign-in, upload and download, merging, sharing and history. Talks to Supabase directly, so there is no build step. |
+| `assets/cms/cloud.js` | Sign-in, upload and download, merging, sharing, history, comments, sign-off and review links. Talks to Supabase directly, so there is no build step. |
+| `assets/cms/review.js` | Compares a page with its original for the Changes view and change lists, and runs the page checks. |
+| `review.html` | The page reviewers see when they open a review link. It needs no account and stores nothing in their browser. |
 | `.gitignore` | Keeps exported project files out of the repository if you later use Git or GitHub Desktop. |
 
 Microsoft (Leeds account) sign-in instead of passwords is possible later. It needs an app registration from IT in the University's Microsoft tenant; `CLOUD-PLAN.md` has the details.

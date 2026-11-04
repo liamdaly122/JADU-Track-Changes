@@ -30,7 +30,7 @@ Screens are reached from the icon rail down the left edge (hover an icon for its
 | Screen | What it does |
 |---|---|
 | **Pages** | A table of pages per **section**. Create pages and sections, move pages between sections with the dropdown on each row; hover a row for Edit, Open and more. |
-| **Edit** (a page) | The live preview (desktop / 1024 / 768 / 375, or the **HTML** view) with the inspector on the right: **Block** (the outline, or the selected block's fields), **Page** (heading, breadcrumb, banner, side column, versions) and **Section** (previous/next, page order, navigation settings). |
+| **Edit** (a page) | The live preview (desktop / 1024 / 768 / 375), the **HTML** view, or **Changes** (what changed since the original, for Jadu), with the inspector on the right: **Block** (the outline, or the selected block's fields), **Page** (heading, breadcrumb, banner, side column, versions), **Section** (previous/next, page order, navigation settings) and **Review** (sign-off, page check, comments). |
 | **Media** | The image library: upload, drop files, see where each image is used, delete. |
 | **Import** | Grabber (recommended), pasted HTML, saved file, or URL (server only). |
 | **Save & export** | Project folder, project files, snapshots, per-page exports, whole-site ZIP. |
@@ -101,6 +101,17 @@ Images from leeds.ac.uk appear in PNG and PDF exports when the CMS has them: the
 - **Markdown** and **Word (.doc)** for documents and reviews.
 - **JSON** page or project exports.
 - **Copy markup**: design-system HTML of a block or page for pasting into Jadu.
+- **Change lists for Jadu** (Word or PDF): see below.
+
+## Review and sign-off
+
+**Changes for Jadu.** Every page imported from leeds.ac.uk keeps an untouched copy of the original and its address. **Changes** in the editor's top bar compares the page with that copy and lists what to do in Jadu, in page order: blocks to add (with where they go), remove, edit or move, with text differences marked word by word, changed links and changed images. Blocks are matched by id, or by type and wording when the original was fetched again. **Word** and **PDF** turn the list into a document for whoever edits the page in Jadu (PDF opens the print window; choose *Save as PDF*). *Save & export* has change lists for every page, or all changed pages in one document. For pages imported before this feature, or made in the CMS, the Changes view can fetch the live page as the original (online), or use the page as it is now.
+
+**Check page** (Review tab). Flags images without alt text, empty alt text, a missing or extra H1, skipped heading levels, empty headings, links without text or with vague text ("click here"), links with no address or a placeholder address, embeds without a title and tables without a header row. Each problem shows its block; click it to find the block in the preview. Links to paths that are not pages in this project, and links to other websites, are listed with **Open** buttons for checking by hand.
+
+**Sign-off and comments** (Review tab, needs the cloud). Send a page for review; anyone the project is shared with, viewers included, can approve it or request changes, with a note. Every step is kept with who and when (**History**), and the tab says when a page was edited after it was approved. Comments go on the page or on a block: pick a block in the composer, choose *Comment on this block* in a block's ⋯ menu, or click a block in the preview while the Review tab is open. Blocks with open comments show a count in the outline; the Pages table shows each page's sign-off status and open comments. Comments and sign-off are stored apart from the project, so they never clash with someone editing the page.
+
+**Review links** (editor ⋯ menu, Review tab or Cloud screen; owners and editors). A read-only copy of a page, its section or the whole project that anyone with the link can open without an account (`review.html#<code>/<page>`). The copy does not change when the project does; **Update** on the Cloud screen replaces it with the latest version and keeps the link, **Delete** stops the link working. Images are copied to a public storage folder named after the link's 64-character code, so only people with the link can find them.
 
 ## Folder layout
 
@@ -108,11 +119,13 @@ Images from leeds.ac.uk appear in PNG and PDF exports when the CMS has them: the
 leeds-cms/
   index.html              the CMS (double-click this)
   view.html               page viewer used by "Open page" (view.html#/slug)
+  review.html             read-only page viewer for review links (review.html#<code>/<slug>)
   serve.ps1               optional local server with an import proxy
   README.md
   assets/ds/              design system assets (tokenised style.css, original, bundle.js, images)
   assets/cms/             CMS code: blocks.js (component registry), render.js, importer.js, exporter.js,
-                          media.js, app.js, forms.js, store.js, seed.js
+                          media.js, app.js, forms.js, store.js, seed.js, review.js (change lists and page checks),
+                          cloud.js and cloud-config.js (cloud saving, sign-off, comments, review links)
   assets/vendor/          html2canvas (PNG export)
   grabber/grabber.js      the page grabber; grabber/bookmarklet.html is the no-install version
   chrome-extension/       unpacked Chrome/Edge extension (manifest, background, grabber, icons)

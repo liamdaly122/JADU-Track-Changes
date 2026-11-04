@@ -35,6 +35,8 @@
     return res.text().then(function (t) {
       var j = null; try { j = JSON.parse(t); } catch (e) {}
       var msg = (j && (j.error_description || j.msg || j.message || j.error)) || t || ('HTTP ' + res.status);
+      // a function the CMS calls is missing: the database was set up with an older setup.sql
+      if (j && j.code === 'PGRST202') msg = 'The cloud database needs an update for this feature: run supabase/setup.sql again in Supabase (SQL Editor). It keeps all existing projects.';
       var err = new Error(String(msg)); err.status = res.status; err.code = j && (j.code || j.error_code); throw err;
     });
   }
@@ -114,8 +116,12 @@
       .then(function (r) { return r.ok ? r.json() : errorFrom(r); });
   }
   function deleteProject(id) {
-    // remove its images first (best effort), then the project row; members and history go with it
-    return request('POST', '/storage/v1/object/list/' + BUCKET, { prefix: id + '/', limit: 1000, offset: 0 }).then(function (items) {
+    // remove its images first (best effort), then the project row; members, history, comments and review links go with it
+    return rpc('share_link_list', { p_project: id }).catch(function () { return []; }).then(function (links) {
+      return Promise.all((links || []).map(function (l) { return removeShareImages(l.token); }));
+    }).then(function () {
+      return request('POST', '/storage/v1/object/list/' + BUCKET, { prefix: id + '/', limit: 1000, offset: 0 });
+    }).then(function (items) {
       var paths = (items || []).filter(function (i) { return i && i.name; }).map(function (i) { return id + '/' + i.name; });
       if (!paths.length) return null;
       return request('DELETE', '/storage/v1/object/' + BUCKET, { prefixes: paths });
@@ -380,6 +386,56 @@
     }).catch(function () { return null; });
   }
 
+  /* ---------------------------------------------------------------- review: comments and sign-off
+     Stored in their own tables, outside the project document, so they never clash with page edits. */
+  function needLink() { if (!link) { var e = new Error('Comments and sign-off need a cloud project: upload this project on the Cloud screen first.'); e.noLink = true; throw e; } return link.projectId; }
+  function reviewCall(name, args) { try { var pid = needLink(); } catch (e) { return Promise.reject(e); } return rpc(name, Object.assign({ p_project: pid }, args || {})); }
+  var review = {
+    summary: function () { return reviewCall('page_review_summary'); },
+    comments: function (pageId) { return reviewCall('page_comment_list', { p_page: pageId || null }); },
+    addComment: function (pageId, blockId, blockLabel, body) { return reviewCall('add_page_comment', { p_page: pageId, p_block: blockId || null, p_block_label: blockLabel || null, p_body: body }); },
+    resolveComment: function (id, resolved) { return rpc('set_comment_resolved', { p_comment: id, p_resolved: !!resolved }); },
+    deleteComment: function (id) { return rpc('delete_page_comment', { p_comment: id }); },
+    setSignoff: function (pageId, status, note, hash) { return reviewCall('set_page_signoff', { p_page: pageId, p_status: status, p_note: note || null, p_hash: hash || null }); },
+    signoffHistory: function (pageId) { return reviewCall('page_signoff_history', { p_page: pageId }); }
+  };
+
+  /* ---------------------------------------------------------------- review links (read-only copies for people without an account) */
+  var SHARE_BUCKET = 'cms-shares';
+  /* copy the images a review copy uses into its folder, skipping those already there */
+  function uploadShareImages(token, data, onProgress) {
+    var ids = M.refsIn({ site: data.site, pages: data.pages }).filter(function (id) { return M.get(id); });
+    return request('POST', '/storage/v1/object/list/' + SHARE_BUCKET, { prefix: token + '/', limit: 1000, offset: 0 }).catch(function () { return []; }).then(function (items) {
+      var have = {}; (items || []).forEach(function (i) { if (i && i.name) have[i.name] = 1; });
+      var todo = ids.filter(function (id) { return !have[id]; }), done = 0;
+      return todo.reduce(function (chain, id) {
+        return chain.then(function () {
+          var rec = M.get(id);
+          return request('POST', '/storage/v1/object/' + SHARE_BUCKET + '/' + token + '/' + id, rec.blob, { 'Content-Type': rec.type || rec.blob.type || 'application/octet-stream', 'x-upsert': 'true' })
+            .then(function () { done++; if (onProgress) onProgress(done, todo.length); });
+        });
+      }, Promise.resolve()).then(function () { return todo.length; });
+    });
+  }
+  function removeShareImages(token) {
+    return request('POST', '/storage/v1/object/list/' + SHARE_BUCKET, { prefix: token + '/', limit: 1000, offset: 0 }).then(function (items) {
+      var paths = (items || []).filter(function (i) { return i && i.name; }).map(function (i) { return token + '/' + i.name; });
+      return paths.length ? request('DELETE', '/storage/v1/object/' + SHARE_BUCKET, { prefixes: paths }) : null;
+    }).catch(function () { return null; });
+  }
+  var shares = {
+    list: function () { return reviewCall('share_link_list'); },
+    create: function (name, scope, data, onProgress) {
+      return reviewCall('create_share_link', { p_name: name, p_scope: scope, p_data: data }).then(function (token) {
+        return uploadShareImages(token, data, onProgress).then(function () { return token; });
+      });
+    },
+    update: function (token, data, onProgress) {
+      return rpc('update_share_link', { p_token: token, p_data: data }).then(function () { return uploadShareImages(token, data, onProgress); });
+    },
+    remove: function (token) { return removeShareImages(token).then(function () { return rpc('delete_share_link', { p_token: token }); }); }
+  };
+
   /* every local save schedules an upload */
   Store.onSave = function () { if (!applying && canEdit()) schedulePush(); };
 
@@ -399,6 +455,7 @@
     listProjects: listProjects, openProject: openProject, uploadAsNew: uploadAsNew, deleteProject: deleteProject, rename: rename,
     members: members, share: share, unshare: unshare, history: history, restoreHistory: restoreHistory,
     push: push, pull: pull, disconnect: disconnect, refreshLink: refreshLink, merge: merge,
+    review: review, shares: shares,
     on: function (fn) { listeners.push(fn); },
     setHooks: function (h) { Object.keys(h || {}).forEach(function (k) { hooks[k] = h[k]; }); }
   };
