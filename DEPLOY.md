@@ -192,8 +192,10 @@ From then on, the top bar shows a **Cloud** chip next to **Saved**:
 
 ## Part 5: The grabber with the online site
 
-- **Chrome or Edge extension.** Version 1.2.0 can deliver to sites on `vercel.app`. Go to `chrome://extensions` (or `edge://extensions`) and click the reload arrow on **Leeds CMS page grabber**. If you give the site its own domain later, add that domain to `host_permissions` in `chrome-extension/manifest.json`.
-- **Bookmarklet.** On the online site's **Import** screen, drag the **Send to Leeds CMS (this site)** button to your bookmarks bar. Its **Send to CMS** opens the online site and delivers the page there.
+The extension and the bookmarklet send pages to `https://jadutrackchange.vercel.app/`.
+
+- **Chrome or Edge extension.** Version 1.3.0 prefers the online CMS tab when more than one CMS tab is open, and opens the online CMS if none is. Go to `chrome://extensions` (or `edge://extensions`) and click the reload arrow on **Leeds CMS page grabber**. If you give the site its own domain later, change the address in `chrome-extension/background.js` (`CMS_HOME`), in `grabber/grabber.js` and `chrome-extension/grabber.js`, and in `host_permissions` in `chrome-extension/manifest.json`.
+- **Bookmarklet.** Drag the button from `grabber/bookmarklet.html`, or the **Send to Leeds CMS (this site)** button on the online site's **Import** screen, to your bookmarks bar. Its **Send to CMS** opens the online site and delivers the page there. Delete any older copy of the bookmark first, because the old one still sends to `localhost`.
 - **Copy and paste.** **Copy** in the grabber pane, then paste on the Import screen. This always works.
 
 ---

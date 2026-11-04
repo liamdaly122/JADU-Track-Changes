@@ -1,12 +1,12 @@
 /* Leeds prototyping CMS - page grabber
    Runs on any web page (injected by the Chrome extension or a bookmarklet). Opens a small pane that lets you send
    the whole page, the main content, a section you pick by clicking, or a whole set of pages (a site section) to
-   the CMS importer. Delivery order: the extension (direct to the open CMS tab), the CMS over http, then the clipboard. */
+   the CMS importer. Delivery order: the extension (direct to the open CMS tab), the online CMS at jadutrackchange.vercel.app, then the clipboard. */
 (function () {
   'use strict';
   if (window.__uolGrabber) { window.__uolGrabber.open(); return; }
 
-  var CMS_URL = (window.__UOL_CMS_URL || 'http://localhost:8765/').replace(/\/?$/, '/');
+  var CMS_URL = (window.__UOL_CMS_URL || 'https://jadutrackchange.vercel.app/').replace(/\/?$/, '/');
   var picking = false, pickedEl = null, hoverEl = null, mode = 'page';
   var hasExtension = !!(window.chrome && chrome.runtime && chrome.runtime.id && chrome.runtime.sendMessage);
 
@@ -51,7 +51,7 @@
     '<div class="links"></div>' +
     '<div class="row"><button type="button" class="btn p" data-act="send">Send to CMS</button><button type="button" class="btn" data-act="copy">Copy</button></div>' +
     '<div class="st"></div>' +
-    '<div class="url">CMS address (only used when the CMS runs from a local server)<input type="text" value="' + CMS_URL + '"></div>' +
+    '<div class="url">CMS address (opened when no CMS tab is found)<input type="text" value="' + CMS_URL + '"></div>' +
     '</div>';
   document.documentElement.appendChild(pane);
 
