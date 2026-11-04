@@ -7,6 +7,6 @@
    Both are safe to publish: the database rules in supabase/setup.sql decide what each signed-in person can see.
    Never put the "secret" or "service_role" key here; the CMS refuses to use it. See DEPLOY.md. */
 window.UOL_CLOUD_CONFIG = {
-  url: '',
-  anonKey: ''
+  url: 'https://hddellgbkzrfknhokubv.supabase.co',
+  anonKey: 'sb_publishable_ps0nTgfZuZ9Q-9UFijF-og_Oz-s8mqj'
 };
