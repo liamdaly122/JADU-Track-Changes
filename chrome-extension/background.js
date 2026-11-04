@@ -1,8 +1,11 @@
 // Leeds CMS page grabber
 // - toolbar button: injects the grabber pane into the current tab
-// - "deliver" messages from the pane: hands the grabbed HTML to an open CMS tab (file:// or http://localhost),
-//   so no local server is needed. The CMS tab is found by its title. Hosted copies on *.vercel.app work too
-//   (add your own domain to host_permissions in manifest.json if you give the site one).
+// - "deliver" messages from the pane: hands the grabbed HTML to an open CMS tab. The CMS tab is found by its title.
+//   The online CMS (https://jadutrackchange.vercel.app/) is preferred when several CMS tabs are open; a local copy
+//   (file:// or http://localhost) is used otherwise. If no CMS tab is open, the pane opens the online CMS itself.
+//   If the site moves to its own domain, change CMS_HOME below, the address in grabber.js, and host_permissions.
+
+const CMS_HOME = 'https://jadutrackchange.vercel.app/';
 
 chrome.action.onClicked.addListener(async (tab) => {
   if (!tab.id || !/^https?:/.test(tab.url || '')) return;
@@ -22,12 +25,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
 async function findCmsTabs() {
   const tabs = await chrome.tabs.query({});
-  return tabs.filter((t) => /^Leeds prototyping CMS/.test(t.title || '') || /leeds-cms\/(index\.html)?([#?]|$)/.test(t.url || ''));
+  const cms = tabs.filter((t) => (t.url || '').startsWith(CMS_HOME) || /^Leeds prototyping CMS/.test(t.title || '') || /leeds-cms\/(index\.html)?([#?]|$)/.test(t.url || ''));
+  // online copy first, then the most recently used
+  return cms.sort((a, b) => ((b.url || '').startsWith(CMS_HOME) - (a.url || '').startsWith(CMS_HOME)) || ((b.lastAccessed || 0) - (a.lastAccessed || 0)));
 }
 
 async function deliver(payload) {
   const tabs = await findCmsTabs();
-  if (!tabs.length) return { ok: false, reason: 'no CMS tab is open (open index.html first)' };
+  if (!tabs.length) return { ok: false, reason: 'no CMS tab is open' };
   const tab = tabs[0];
   try {
     await chrome.scripting.executeScript({

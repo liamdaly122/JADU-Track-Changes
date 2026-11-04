@@ -77,14 +77,16 @@ The importer recognises the design system markup and turns it into editable bloc
 
 ### Page grabber
 
-**Chrome or Edge extension** (works with the CMS opened from a file, no server):
+The grabber sends pages to the online CMS at https://jadutrackchange.vercel.app/.
+
+**Chrome or Edge extension:**
 
 1. Go to `chrome://extensions` (Edge: `edge://extensions`) and turn on **Developer mode**.
 2. **Load unpacked** → choose the `chrome-extension` folder in the CMS folder. Pin the red **L** button.
-3. Because the CMS is a file, open the extension's *Details* page and turn on **Allow access to file URLs** (once).
-4. Keep the CMS tab open. On any leeds.ac.uk page click the red **L**: a pane offers *whole page*, *main content*, *pick a section* (hover and click a component) or *site section* (it lists the links in the section navigation, contents and previous/next, fetches the ticked pages from inside leeds.ac.uk and sends them as one section). **Send to CMS** delivers straight to the open CMS tab; **Copy** puts the HTML (or JSON for a section) on the clipboard for the Import screen.
+3. Only if you also use a copy of the CMS opened from a file: open the extension's *Details* page and turn on **Allow access to file URLs** (once).
+4. Keep the CMS tab open (if several CMS tabs are open, the online one is used; if none is, **Send to CMS** opens the online CMS). On any leeds.ac.uk page click the red **L**: a pane offers *whole page*, *main content*, *pick a section* (hover and click a component) or *site section* (it lists the links in the section navigation, contents and previous/next, fetches the ticked pages from inside leeds.ac.uk and sends them as one section). **Send to CMS** delivers straight to the CMS tab; **Copy** puts the HTML (or JSON for a section) on the clipboard for the Import screen.
 
-**Bookmarklet** (if extensions are blocked): open `grabber/bookmarklet.html`, drag the button to the bookmarks bar, click it on a leeds.ac.uk page, use **Copy** in the pane, then paste on the Import screen.
+**Bookmarklet** (if extensions are blocked): open `grabber/bookmarklet.html` (or the Import screen on the online CMS) and drag the button to the bookmarks bar. Click it on a leeds.ac.uk page and use **Send to CMS**: it opens the online CMS and delivers the page to its Import screen. **Copy** and paste on the Import screen also works.
 
 ## Exporting
 
