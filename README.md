@@ -111,7 +111,15 @@ Images from leeds.ac.uk appear in PNG and PDF exports when the CMS has them: the
 
 **Sign-off and comments** (Review tab, needs the cloud). Send a page for review; anyone the project is shared with, viewers included, can approve it or request changes, with a note. Every step is kept with who and when (**History**), and the tab says when a page was edited after it was approved. Comments go on the page or on a block: pick a block in the composer, choose *Comment on this block* in a block's ⋯ menu, or click a block in the preview while the Review tab is open. Blocks with open comments show a count in the outline; the Pages table shows each page's sign-off status and open comments. Comments and sign-off are stored apart from the project, so they never clash with someone editing the page.
 
+**Jadu checklist** (Changes view, needs the cloud). Whoever makes the changes in Jadu ticks each item off as they go: the tick records who and when, the bar shows "3 of 7 done in Jadu", **Hide done** leaves only what is left, and the Pages table shows each page's progress. If a ticked change is edited again in the CMS, its tick is marked *Edited since ticked* and stops counting. Word and PDF change lists have tick boxes, filled in for what is done.
+
+**Live updates** (needs the cloud). Comments, sign-off, Jadu ticks and colleagues' saves arrive within seconds through Supabase Realtime; the Cloud screen says "live updates on". If the connection drops, the CMS reconnects, and the once-a-minute check carries on regardless.
+
+**Email notifications** (optional, see DEPLOY.md part 7). Emails when a page is sent for review, approved or sent back, and when someone comments, sent by Supabase through Resend. Each person chooses on the Cloud screen, per project.
+
 **Review links** (editor ⋯ menu, Review tab or Cloud screen; owners and editors). A read-only copy of a page, its section or the whole project that anyone with the link can open without an account (`review.html#<code>/<page>`). The copy does not change when the project does; **Update** on the Cloud screen replaces it with the latest version and keeps the link, **Delete** stops the link working. Images are copied to a public storage folder named after the link's 64-character code, so only people with the link can find them.
+
+Reviewers can **comment through the link** unless it was made with comments off (or they are turned off later on the Cloud screen). They give their name, then comment on the page or click **Pick a part** and click the part of the page the comment is about. Their comments appear on the Review tab, marked with the reviewer's name and the link they came through, and resolving or deleting works as for any comment. Reviewers see only comments made through the same link, never the team's own. A link takes at most 60 comments an hour, to stop abuse. The reviewer's name is the only thing the review page keeps in their browser.
 
 ## Folder layout
 
@@ -140,4 +148,4 @@ leeds-cms/
 - Freight fonts load from Adobe Fonts over the internet; offline, the fallback fonts are used.
 - PNG export includes images the browser is allowed to fetch; images uploaded to the library always work, images hot-linked from other sites may be blank.
 - Cookie control, course finder search and other server-backed features are not simulated.
-- Browser storage holds a few MB of content; very large projects (hundreds of imported pages) are better split, or kept in a linked folder.
+- The working copy (pages, site settings, page versions and the originals kept for Changes) must fit in about 5 MB of browser storage. Save & export shows what takes the room; the CMS warns at 70% and 90% and **Free up space** removes older page versions or the originals of finished pages. Images and snapshots are kept in the browser's database, which has far more room.

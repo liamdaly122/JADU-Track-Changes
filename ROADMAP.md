@@ -4,6 +4,10 @@ Captured 3 November 2026 after a full test pass. Ordered by expected value.
 
 **Done 4 November 2026:** items 1 and 6 became **Check page** on the editor's Review tab; item 3 became **Changes for Jadu** (comparison with the original imported page, with Word and PDF change lists). Also added: sign-off and comments in the cloud, and read-only review links. See "Review and sign-off" in `README.md`.
 
+**Done 5 November 2026:** item 8 (storage guard: a meter on Save & export, warnings at 70% and 90%, and Free up space; snapshots moved to the browser database). Also added: the Jadu checklist, comments from review links, live updates through Supabase Realtime, and optional email notifications.
+
+**Still open after that:** block-level merging when two people edit the same page, automated tests in the repository, and items 2, 4, 5, 7 and 9 below.
+
 1. **Accessibility nudges.** Flag images without alt text, skipped heading levels and empty link text in the block list and in the preview toolbar, since pages are headed for Jadu and the content sign-off review.
 2. **Auto breadcrumb.** Generate the breadcrumb from the section and its homepage, the way the side menu, contents list and previous/next links already are.
 3. **Version comparison.** Show what changed between two versions of a page (added, removed and changed blocks, text differences) before restoring.

@@ -188,6 +188,32 @@
       return list;
     },
 
+    /* ---------- storage guard ----------
+       Browsers give each site about 5 MB of localStorage (counted in characters). Pages, their saved versions and
+       the originals kept for Changes all live in one entry, so this reports what takes the room. */
+    LIMIT: 5000000,
+    storageReport: function () {
+      var r = { versions: 0, originals: 0, content: 0, other: 0, total: 0, limit: this.LIMIT, pages: [] };
+      try { for (var k in localStorage) if (Object.prototype.hasOwnProperty.call(localStorage, k)) { var n = k.length + (localStorage.getItem(k) || '').length; r.total += n; if (k !== KEY) r.other += n; } } catch (e) {}
+      (this.data.pages || []).forEach(function (p) {
+        var v = p.revisions && p.revisions.length ? JSON.stringify(p.revisions).length : 0;
+        var o = p.source && p.source.original ? JSON.stringify(p.source.original).length : 0;
+        r.versions += v; r.originals += o;
+        r.pages.push({ id: p.id, title: p.title, versions: v, versionCount: (p.revisions || []).length, original: o });
+      });
+      r.content = Math.max(0, r.total - r.other - r.versions - r.originals);
+      r.share = r.total / r.limit;
+      r.level = r.share >= 0.9 ? 'danger' : r.share >= 0.7 ? 'warn' : 'ok';
+      return r;
+    },
+    /* keep only the newest n saved versions of every page; returns how many were removed */
+    trimVersions: function (n) {
+      var removed = 0;
+      this.data.pages.forEach(function (p) { if (p.revisions && p.revisions.length > n) { removed += p.revisions.length - n; p.revisions.length = n; } });
+      if (removed) this.save();
+      return removed;
+    },
+
     /* ---------- helpers ---------- */
     uid: uid, clone: deepClone, slugify: slugify,
     storageUsage: function () {

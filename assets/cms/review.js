@@ -255,7 +255,13 @@
       if (ch.length) pageChanges.push({ label: g.label, changes: ch });
     });
     var total = counts.added + counts.removed + counts.edited + counts.moved + pageChanges.length;
-    return { items: items, pageChanges: pageChanges, counts: counts, total: total };
+    items.forEach(function (it) {
+      if (it.kind === 'unchanged' && !it.moved) return;
+      it.key = (it.kind === 'removed' ? 'removed:' : 'block:') + it.block.id;
+      it.hash = fnv(JSON.stringify({ k: it.kind, m: !!it.moved, c: it.changes || it.content, a: it.after ? it.after.id : '', w: it.wasAfter ? it.wasAfter.id : '' }));
+    });
+    var pageItem = pageChanges.length ? { key: 'page', hash: fnv(JSON.stringify(pageChanges)) } : null;
+    return { items: items, pageChanges: pageChanges, pageItem: pageItem, counts: counts, total: total };
   }
 
   /* ================= the change list (shared by the CMS view, Word and PDF) ================= */
@@ -288,16 +294,43 @@
     }).join('');
   }
   /* mode 'app' adds "Show in page" buttons and resolves images for the browser; 'export' keeps media refs for inlining */
+  /* the changes to make in Jadu, each with its key and fingerprint */
+  function checklist(diff) { return (diff.pageItem ? [diff.pageItem] : []).concat(diff.items.filter(function (it) { return it.key; })); }
+  function checkState(item, checks) {
+    var c = checks && checks[item.key];
+    return { row: c || null, done: !!(c && c.item_hash === item.hash), stale: !!(c && c.item_hash !== item.hash) };
+  }
+  function progress(diff, checks) {
+    var list = checklist(diff), done = list.filter(function (it) { return checkState(it, checks).done; }).length;
+    return { done: done, total: list.length };
+  }
+  function shortDate(iso) { var d = new Date(iso); return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }); }
+  /* opts.checks: {key: {item_hash, done_by_email, done_at}}; in the CMS opts.checkable shows tick boxes */
+  function checkHtml(item, mode, opts) {
+    if (!opts.checks && !opts.checkable) return '';
+    var st = checkState(item, opts.checks), r = st.row;
+    var who = r ? (r.done_by_email ? r.done_by_email.replace(/@.*/, '') : 'someone') + ', ' + shortDate(r.done_at) : '';
+    if (mode === 'app') {
+      return '<label class="cl-check' + (st.done ? ' is-done' : st.stale ? ' is-stale' : '') + '"' + (st.stale ? ' title="Ticked by ' + esc(who) + ', then the change was edited again"' : '') + '><input type="checkbox" class="cl-check__box" data-key="' + esc(item.key) + '" data-hash="' + esc(item.hash) + '"' + (st.done ? ' checked' : '') + (opts.checkable ? '' : ' disabled') + '> ' +
+        (st.done ? 'Done in Jadu · ' + esc(who) : st.stale ? 'Edited since ticked' : 'Done in Jadu') + '</label>';
+    }
+    return '<span class="cl-check">' + (st.done ? '&#9745; Done in Jadu (' + esc(who) + ')' : '&#9744; Done in Jadu') + '</span>';
+  }
   function itemsHtml(diff, mode, opts) {
     opts = opts || {};
     var out = '', n = 0;
     if (diff.pageChanges.length) {
-      out += '<section class="cl-item cl-item--edited"><div class="cl-head"><span class="cl-num">' + (++n) + '</span><span class="cl-tag cl-tag--edited">Edit</span><strong>Page details</strong></div>' +
+      var pst = checkState(diff.pageItem, opts.checks);
+      n++;
+      if (!(opts.hideDone && pst.done)) out += '<section class="cl-item cl-item--edited' + (pst.done ? ' cl-item--done' : '') + '"><div class="cl-head"><span class="cl-num">' + n + '</span><span class="cl-tag cl-tag--edited">Edit</span><strong>Page details</strong>' + checkHtml(diff.pageItem, mode, opts) + '</div>' +
         diff.pageChanges.map(function (g) { return g.changes.map(function (c) { return changeHtml(c, mode); }).join(''); }).join('') + '</section>';
     }
-    var unchanged = 0;
+    var unchanged = 0, hidden = 0;
     diff.items.forEach(function (it) {
       if (it.kind === 'unchanged' && !it.moved) { unchanged++; if (!opts.showUnchanged) return; }
+      var done = it.key && checkState(it, opts.checks).done;
+      if (it.key) n++;
+      if (opts.hideDone && done) { hidden++; return; }
       var kind = it.kind === 'unchanged' && it.moved ? 'moved' : it.kind;
       var where = it.kind === 'removed' ? 'Was block ' + (it.origIndex + 1) + ' of the original' : 'Block ' + (it.index + 1);
       var show = mode === 'app' && it.kind !== 'removed' ? '<button type="button" class="btn btn--xs cl-show" data-block="' + esc(it.block.id) + '">Show in page</button>' : '';
@@ -309,10 +342,11 @@
       if (it.kind === 'added') body = contentHtml(it.content, 'ins', mode);
       else if (it.kind === 'removed') body = contentHtml(it.content.slice(0, 6), 'del', mode) + (it.content.length > 6 ? '<p class="cl-note">and ' + (it.content.length - 6) + ' more fields</p>' : '');
       else if (it.changes && it.changes.length) body = it.changes.map(function (c) { return changeHtml(c, mode); }).join('');
-      out += '<section class="cl-item cl-item--' + kind + '"' + (it.kind !== 'removed' ? ' data-block="' + esc(it.block.id) + '"' : '') + '>' +
-        '<div class="cl-head"><span class="cl-num">' + (kind === 'unchanged' ? '' : ++n) + '</span><span class="cl-tag cl-tag--' + kind + '">' + (it.kind === 'edited' && it.moved ? 'Edit and move' : KIND_TEXT[kind]) + '</span><strong>' + esc(it.label) + '</strong><span class="cl-where">' + where + '</span>' + show + '</div>' +
+      out += '<section class="cl-item cl-item--' + kind + (done ? ' cl-item--done' : '') + '"' + (it.kind !== 'removed' ? ' data-block="' + esc(it.block.id) + '"' : '') + '>' +
+        '<div class="cl-head"><span class="cl-num">' + (it.key ? n : '') + '</span><span class="cl-tag cl-tag--' + kind + '">' + (it.kind === 'edited' && it.moved ? 'Edit and move' : KIND_TEXT[kind]) + '</span><strong>' + esc(it.label) + '</strong><span class="cl-where">' + where + '</span>' + (it.key ? checkHtml(it, mode, opts) : '') + show + '</div>' +
         (hint ? '<p class="cl-hint">' + hint + '</p>' : '') + body + '</section>';
     });
+    if (hidden) out += '<p class="cl-unchanged">' + hidden + ' change' + (hidden === 1 ? '' : 's') + ' done in Jadu, hidden.</p>';
     if (!opts.showUnchanged && unchanged) out += '<p class="cl-unchanged">' + unchanged + ' block' + (unchanged === 1 ? '' : 's') + ' unchanged.</p>';
     return out;
   }
@@ -335,10 +369,11 @@
       ['Prototype path', '/' + esc(page.slug)],
       src.importedAt ? ['Original copied', esc(fmtDate(src.importedAt))] : null,
       meta.signoff ? ['Sign-off', esc(meta.signoff)] : null,
-      ['Changes', esc(countsLine(diff))]
+      ['Changes', esc(countsLine(diff))],
+      meta.checks && progress(diff, meta.checks).done ? ['Done in Jadu', progress(diff, meta.checks).done + ' of ' + progress(diff, meta.checks).total] : null
     ].filter(Boolean);
     return '<section class="cl-page"><h2>' + esc(page.title) + '</h2><table class="cl-meta">' + rows.map(function (r) { return '<tr><th>' + r[0] + '</th><td>' + r[1] + '</td></tr>'; }).join('') + '</table>' +
-      (diff.total ? itemsHtml(diff, 'export') : '<p class="cl-unchanged">No changes from the original.</p>') + '</section>';
+      (diff.total ? itemsHtml(diff, 'export', { checks: meta.checks || {} }) : '<p class="cl-unchanged">No changes from the original.</p>') + '</section>';
   }
   var CL_CSS = '.cl-doc{font-family:Arial,Helvetica,sans-serif;font-size:11pt;color:#212529;line-height:1.45}' +
     '.cl-doc h1{font-size:20pt;margin:0 0 4pt}.cl-doc h2{font-size:15pt;margin:18pt 0 6pt;border-bottom:2px solid #c70000;padding-bottom:3pt}.cl-intro{color:#555;margin:0 0 10pt}' +
@@ -346,6 +381,8 @@
     '.cl-item{border:1px solid #d9d6d2;border-left:4px solid #999;border-radius:6px;padding:8px 12px;margin:0 0 10px;background:#fff;page-break-inside:avoid}' +
     '.cl-item--added{border-left-color:#1f7a3a}.cl-item--removed{border-left-color:#b00020}.cl-item--edited{border-left-color:#156265}.cl-item--moved{border-left-color:#8a5a00}.cl-item--unchanged{border-left-color:#ccc;opacity:.75}' +
     '.cl-head{display:flex;flex-wrap:wrap;align-items:center;gap:8px}.cl-head strong{font-size:1.02em}.cl-num{min-width:1.4em;color:#636363;font-weight:bold}.cl-where{color:#636363;font-size:.85em}.cl-show{margin-left:auto}' +
+    '.cl-check{margin-left:auto;font-size:.85em;color:#444;display:inline-flex;align-items:center;gap:5px;white-space:nowrap}.cl-check + .cl-show{margin-left:0}.cl-check.is-done{color:#1f6b3a;font-weight:600}.cl-check.is-stale{color:#8a5a00;font-weight:600}' +
+    '.cl-item--done{background:#f6fbf7}.cl-item--done .cl-field,.cl-item--done .cl-hint{opacity:.6}' +
     '.cl-tag{display:inline-block;font-size:.72em;font-weight:bold;letter-spacing:.04em;text-transform:uppercase;padding:1px 7px;border-radius:9px;background:#eee;color:#333}' +
     '.cl-tag--added{background:#e2f3e6;color:#1f6b3a}.cl-tag--removed{background:#fde8ea;color:#9b0018}.cl-tag--edited{background:#e3f0f1;color:#0f4f52}.cl-tag--moved{background:#fff1d6;color:#6b4600}' +
     '.cl-hint{margin:6px 0 2px;font-weight:600;color:#333}.cl-field{display:flex;gap:12px;padding:6px 0;border-top:1px solid #eee}.cl-field:first-of-type{border-top:0}.cl-head + .cl-field,.cl-hint + .cl-field{border-top:1px solid #eee;margin-top:6px}' +
@@ -450,15 +487,16 @@
   }
 
   /* ================= a short fingerprint of a page's content (to spot edits after sign-off) ================= */
-  function contentHash(page) {
-    var s = JSON.stringify({ t: page.title, s: page.settings, h: page.hero, b: page.blocks, p: page.template }), h = 0x811c9dc5;
+  function fnv(s) {
+    var h = 0x811c9dc5;
     for (var i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
     return ('0000000' + h.toString(16)).slice(-8) + '-' + s.length.toString(36);
   }
+  function contentHash(page) { return fnv(JSON.stringify({ t: page.title, s: page.settings, h: page.hero, b: page.blocks, p: page.template })); }
 
   window.UOL_REVIEW = {
     htmlToText: htmlToText, wordDiff: wordDiff, diffHtml: diffHtml,
-    diffPage: diffPage, itemsHtml: itemsHtml, countsLine: countsLine, changeListDocument: changeListDocument, css: CL_CSS,
+    diffPage: diffPage, itemsHtml: itemsHtml, countsLine: countsLine, checklist: checklist, progress: progress, changeListDocument: changeListDocument, css: CL_CSS,
     blockLabel: blockLabel, blockSummary: blockSummary,
     checkPage: checkPage, contentHash: contentHash
   };

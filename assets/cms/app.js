@@ -172,8 +172,11 @@
   /* ================= persistence ================= */
   var saveNow = function () {
     if (App.page) App.page.updatedAt = new Date().toISOString();
-    if (Store.save()) { App.dirty = false; App.lastSaved = new Date(); updateSaveStatus(); writeFolderSoon(); }
-    else { updateSaveStatus(); toast('Could not save: browser storage is full. Move images to the Media library (Save & export) or link a project folder.', 'error', 7000); }
+    if (Store.save()) { App.dirty = false; App.lastSaved = new Date(); updateSaveStatus(); writeFolderSoon(); storageGuard(); }
+    else {
+      updateSaveStatus();
+      showBanner('warn', ['Browser storage is full, so the latest change is not saved. Free up space, then keep editing.'], [{ label: 'Free up space', primary: true, onClick: freeSpaceDialog }]);
+    }
   };
   var saveSoon = debounce(saveNow, 500);
   function markDirty() { App.dirty = true; updateSaveStatus(); saveSoon(); }
@@ -384,13 +387,104 @@
   }
 
   /* ---------- project snapshots ---------- */
-  var SNAP_KEY = 'leeds-cms:snapshots';
-  function getSnapshots() { try { return JSON.parse(localStorage.getItem(SNAP_KEY) || '[]'); } catch (e) { return []; } }
+  /* Snapshots are whole-project copies, so they live in the browser database (IndexedDB), which has far more room
+     than the roughly 5 MB that holds the working copy. Earlier versions kept them in localStorage; they move once. */
+  var SNAP_KEY = 'leeds-cms:snapshots', SNAP_DB_KEY = 'snapshots';
+  function getSnapshots() { return M.kvGet(SNAP_DB_KEY).then(function (l) { return Array.isArray(l) ? l : []; }); }
+  function putSnapshots(list) { return M.kvSet(SNAP_DB_KEY, list); }
   function saveSnapshot(name) {
-    var list = getSnapshots();
-    list.unshift({ id: Store.uid('snap'), name: name, at: new Date().toISOString(), pages: Store.data.pages.length, data: JSON.parse(Store.exportJson()) });
-    if (list.length > 8) list.length = 8;
-    try { localStorage.setItem(SNAP_KEY, JSON.stringify(list)); toast('Snapshot "' + name + '" saved', 'success'); } catch (e) { toast('Could not save snapshot: storage full. Save the project to a file instead.', 'error', 5000); }
+    var entry = { id: Store.uid('snap'), name: name, at: new Date().toISOString(), pages: Store.data.pages.length, data: JSON.parse(Store.exportJson()) };
+    return getSnapshots().then(function (list) { list.unshift(entry); if (list.length > 8) list.length = 8; return putSnapshots(list); }).then(function (ok) {
+      if (ok) toast('Snapshot "' + name + '" saved', 'success'); else toast('Could not save the snapshot in this browser. Save the project to a file instead.', 'error', 5000);
+      return ok;
+    });
+  }
+  function migrateSnapshots() {
+    var old; try { old = JSON.parse(localStorage.getItem(SNAP_KEY) || 'null'); } catch (e) { old = null; }
+    if (!Array.isArray(old)) return Promise.resolve(0);
+    return getSnapshots().then(function (cur) {
+      var ids = {}; cur.forEach(function (s) { ids[s.id] = 1; });
+      return putSnapshots(cur.concat(old.filter(function (s) { return !ids[s.id]; })).sort(function (a, b) { return (b.at || '').localeCompare(a.at || ''); }).slice(0, 8));
+    }).then(function (ok) { if (ok) { try { localStorage.removeItem(SNAP_KEY); } catch (e) {} } return ok ? old.length : 0; });
+  }
+
+  /* ---------- storage guard: the working copy must fit in about 5 MB of localStorage ---------- */
+  function fmtSize(chars) { return chars >= 995000 ? (chars / 1e6).toFixed(1) + ' MB' : Math.max(1, Math.round(chars / 1000)) + ' KB'; }
+  var METER_PARTS = [['content', 'Pages and site settings'], ['versions', 'Saved page versions'], ['originals', 'Originals kept for Changes'], ['other', 'Other settings']];
+  function storageMeter(r) {
+    r = r || Store.storageReport();
+    var pct = Math.round(r.share * 100);
+    var bar = el('div', { class: 'meter meter--' + r.level, role: 'img', 'aria-label': 'Browser storage ' + pct + '% full' });
+    METER_PARTS.forEach(function (m) { if (r[m[0]] > 0) bar.appendChild(el('span', { class: 'meter__seg meter__seg--' + m[0], style: 'width:' + Math.min(100, r[m[0]] / r.limit * 100).toFixed(2) + '%', title: m[1] + ': ' + fmtSize(r[m[0]]) })); });
+    return el('div', { class: 'meter-wrap' }, [
+      el('div', { class: 'meter__head' }, [el('strong', { text: fmtSize(r.total) + ' of about ' + fmtSize(r.limit) + ' used (' + pct + '%)' }), r.level !== 'ok' ? el('span', { class: 'count-pill count-pill--' + (r.level === 'danger' ? 'error' : 'warn'), text: r.level === 'danger' ? 'Nearly full' : 'Filling up' }) : null]),
+      bar,
+      el('div', { class: 'meter__legend' }, METER_PARTS.map(function (m) { return el('span', { class: 'meter__key' }, [el('i', { class: 'meter__dot meter__seg--' + m[0] }), m[1] + ': ' + fmtSize(r[m[0]])]); }))
+    ]);
+  }
+  var lastGuard = 0, guardShown = {};
+  /* after saves: a banner once per session when storage passes 70%, and again at 90% */
+  function storageGuard(force) {
+    if (!force && Date.now() - lastGuard < 15000) return;
+    lastGuard = Date.now();
+    var r = Store.storageReport();
+    if (r.level === 'ok' || guardShown[r.level]) return;
+    guardShown[r.level] = true;
+    showBanner('warn', ['Browser storage is ' + Math.round(r.share * 100) + '% full. ' + (r.level === 'danger' ? 'When it is full, changes stop saving.' : 'Free up some space before it fills.')], [{ label: 'Free up space', primary: true, onClick: freeSpaceDialog }, { label: 'Later' }]);
+  }
+  /* pages that are finished: approved and unchanged since, or every change done in Jadu */
+  function handedOver(p) {
+    var s = App.reviewSummary && App.reviewSummary[p.id], j = jaduProgress(p);
+    var approved = !!(s && s.status === 'approved' && s.content_hash === RV.contentHash(p));
+    var done = !!(j && j.total && j.done >= j.total);
+    return approved || done ? (done ? 'Done in Jadu' : 'Approved') : '';
+  }
+  function freeSpaceDialog() {
+    var body = el('div', { class: 'freespace' });
+    function render() {
+      var r = Store.storageReport();
+      body.innerHTML = '';
+      body.appendChild(storageMeter(r));
+      body.appendChild(el('p', { class: 'small', text: 'The working copy of the project (pages, site settings, page versions and the originals kept for Changes) lives in about 5 MB of browser storage. Images and snapshots are kept separately and have far more room.' }));
+      // saved versions
+      var count = r.pages.reduce(function (n, p) { return n + p.versionCount; }, 0);
+      var keep = el('select', { class: 'input input--sm', 'aria-label': 'Versions to keep per page' }, [['5', 'the latest 5'], ['3', 'the latest 3'], ['1', 'the latest 1'], ['0', 'none']].map(function (o) { return option(o[0], o[1]); }));
+      keep.value = '3';
+      body.appendChild(el('h3', { text: 'Saved page versions' }));
+      body.appendChild(el('p', { class: 'small muted', text: count ? count + ' saved version' + (count === 1 ? '' : 's') + ' across all pages, using ' + fmtSize(r.versions) + '.' : 'No saved versions.' }));
+      if (count) body.appendChild(el('div', { class: 'row' }, [el('span', { class: 'small', text: 'Keep' }), keep, el('span', { class: 'small', text: 'of each page' }), el('button', { class: 'btn btn--sm', type: 'button', onclick: function () {
+        var n = Store.trimVersions(+keep.value); toast(n ? n + ' older version' + (n === 1 ? '' : 's') + ' removed' : 'Nothing to remove', n ? 'success' : 'info'); render(); if (App.view === 'edit' && App.sideTab === 'page') renderEditorSide();
+      } }, ['Remove older versions'])]));
+      // originals
+      var withOriginal = r.pages.filter(function (p) { return p.original; }).sort(function (a, b) { return b.original - a.original; });
+      body.appendChild(el('h3', { text: 'Originals kept for Changes' }));
+      if (!withOriginal.length) body.appendChild(el('p', { class: 'small muted', text: 'No page keeps an original.' }));
+      else {
+        body.appendChild(el('p', { class: 'small muted', text: 'Each imported page keeps a copy of the live page to list changes for Jadu. Remove it once the page is finished; you can fetch the live page again later. Finished pages are ticked.' }));
+        var list = el('div', { class: 'freespace__list' });
+        withOriginal.forEach(function (info) {
+          var p = Store.getPage(info.id), state = p ? handedOver(p) : '';
+          var cb = el('input', { type: 'checkbox', value: info.id, checked: !!state });
+          list.appendChild(el('label', { class: 'freespace__row' }, [cb, el('span', { class: 'freespace__title', text: info.title }), state ? el('span', { class: 'signoff__pill signoff__pill--sm signoff__pill--approved', text: state }) : null, el('span', { class: 'small muted', text: fmtSize(info.original) })]));
+        });
+        body.appendChild(list);
+        body.appendChild(el('div', { class: 'row' }, [el('button', { class: 'btn btn--sm', type: 'button', onclick: function () {
+          var ids = Array.prototype.map.call(list.querySelectorAll('input:checked'), function (c) { return c.value; });
+          if (!ids.length) { toast('Tick the pages first', 'info'); return; }
+          UI.confirm('Remove originals', 'Remove the original copy from ' + ids.length + ' page' + (ids.length === 1 ? '' : 's') + '? Their change lists go too. The live page address is kept so you can fetch it again.', 'Remove', true).then(function (ok) {
+            if (!ok) return;
+            ids.forEach(function (id) { var p = Store.getPage(id); if (p && p.source) p.source = { url: p.source.url || '', removedAt: new Date().toISOString() }; });
+            Store.save(); toast('Originals removed', 'success'); render();
+            if (App.view === 'edit' && App.previewMode === 'changes') renderChanges();
+          });
+        } }, ['Remove ticked originals'])]));
+      }
+      var est = el('p', { class: 'small muted' });
+      body.appendChild(est);
+      if (navigator.storage && navigator.storage.estimate) navigator.storage.estimate().then(function (e) { if (e && e.quota) est.textContent = 'Images and snapshots: ' + fmtSize(e.usage || 0) + ' used of ' + fmtSize(e.quota) + ' available to this site.'; }).catch(function () {});
+    }
+    render();
+    UI.modal({ title: 'Free up browser storage', wide: true, body: body, buttons: [{ label: 'Done', primary: true }] });
   }
 
   /* ================= preview ================= */
@@ -1287,6 +1381,40 @@
   }
   function pageDiff(page) { return page && page.source && page.source.original ? RV.diffPage(page.source.original, page, { pageGroups: pageDiffGroups(page) }) : null; }
 
+  /* the Jadu checklist for the open page: {key: {item_hash, done_by_email, done_at}}, kept in the cloud */
+  function pageJadu() { return App.page && App.jadu && App.jadu.pageId === App.page.id ? App.jadu : null; }
+  function checksByPage(rows) { var m = {}; (rows || []).forEach(function (r) { (m[r.page_id] = m[r.page_id] || {})[r.item_key] = r; }); return m; }
+  function loadJadu(force) {
+    var page = App.page, C = window.UOL_CLOUD;
+    if (!page || !cloudReady()) return Promise.resolve(null);
+    var j = pageJadu() || (App.jadu = { pageId: page.id, checks: {}, loaded: false });
+    if (j.loading && !force) return j.loading;
+    j.loading = C.review.jaduChecks(page.id).then(function (rows) {
+      j.loading = null; j.checks = checksByPage(rows)[page.id] || {}; j.loaded = true; j.error = '';
+      noteJaduProgress(page);
+      if (App.jadu === j && App.view === 'edit') { if (App.previewMode === 'changes') renderChanges(); if (App.sideTab === 'review' && reviewEls && reviewEls.changes) { reviewEls.changes.innerHTML = ''; renderChangesSummary(reviewEls.changes); } }
+      return j;
+    }, function (e) { j.loading = null; j.error = e.message; return j; });
+    return j.loading;
+  }
+  function noteJaduProgress(page) {
+    var j = pageJadu();
+    App.jaduChecks = App.jaduChecks || {};
+    if (j && j.loaded) App.jaduChecks[page.id] = j.checks;
+  }
+  /* {done, total} for a page from the ticks we know about, against its changes as they are now */
+  function jaduProgress(p) {
+    var checks = App.jaduChecks && App.jaduChecks[p.id], d = checks && pageDiff(p);
+    return d && d.total ? RV.progress(d, checks) : null;
+  }
+  function tickJadu(box) {
+    var page = App.page, j = pageJadu(), C = window.UOL_CLOUD, key = box.getAttribute('data-key'), hash = box.getAttribute('data-hash'), on = box.checked;
+    if (!j) return;
+    var before = j.checks[key];
+    if (on) j.checks[key] = { item_key: key, item_hash: hash, done_by_email: (C.user() || {}).email, done_at: new Date().toISOString() }; else delete j.checks[key];
+    noteJaduProgress(page); renderChanges();
+    C.review.setJaduCheck(page.id, key, hash, on).catch(function (e) { if (before) j.checks[key] = before; else delete j.checks[key]; noteJaduProgress(page); renderChanges(); cloudError(e); });
+  }
   var renderChangesSoon = debounce(function () { renderChanges(); }, 350);
   function renderChanges() {
     var host = Preview.changesEl, page = App.page;
@@ -1298,6 +1426,11 @@
     var diff = pageDiff(page), showAll = !!App.changesShowAll;
     var allChk = el('input', { type: 'checkbox', checked: showAll });
     allChk.addEventListener('change', function () { App.changesShowAll = allChk.checked; renderChanges(); });
+    var j = cloudReady() ? pageJadu() : null;
+    if (cloudReady() && !(j && (j.loaded || j.loading))) loadJadu(false);
+    var checks = j && j.loaded ? j.checks : null, prog = checks && diff.total ? RV.progress(diff, checks) : null;
+    var doneChk = el('input', { type: 'checkbox', checked: !!App.changesHideDone });
+    doneChk.addEventListener('change', function () { App.changesHideDone = doneChk.checked; renderChanges(); });
     var label = diff.total ? RV.countsLine(diff) : 'no changes yet';
     host.appendChild(el('div', { class: 'changes__bar' }, [
       el('div', { class: 'changes__summary' }, [
@@ -1305,14 +1438,18 @@
         el('span', { class: 'small muted' }, ['Compared with ', src.url ? el('a', { href: src.url, target: '_blank', rel: 'noopener', text: 'the live page' }) : 'the original', ' as copied ' + fmtTime(src.importedAt)])
       ]),
       el('span', { class: 'spacer' }),
+      prog ? el('span', { class: 'changes__progress' + (prog.done === prog.total ? ' is-complete' : ''), title: 'Ticked off by whoever makes the changes in Jadu' }, [prog.done === prog.total ? 'All ' + prog.total + ' done in Jadu' : prog.done + ' of ' + prog.total + ' done in Jadu']) : null,
+      prog && prog.done ? el('label', { class: 'check small' }, [doneChk, el('span', { text: 'Hide done' })]) : null,
       el('label', { class: 'check small' }, [allChk, el('span', { text: 'Show unchanged blocks' })]),
       el('button', { class: 'btn btn--sm', type: 'button', title: 'Download the change list as a Word document', onclick: function () { exportChangeList([page], 'word'); } }, ['Word']),
       el('button', { class: 'btn btn--sm', type: 'button', title: 'Print the change list or save it as a PDF', onclick: function () { exportChangeList([page], 'pdf'); } }, ['PDF']),
       menuButton(null, originalMenuItems(page), { icon: 'more', title: 'Original page options' })
     ]));
     var doc = el('div', { class: 'cl-doc changes__list' });
-    if (diff.total || showAll) doc.innerHTML = RV.itemsHtml(diff, 'app', { showUnchanged: showAll });
+    if (diff.total || showAll) doc.innerHTML = RV.itemsHtml(diff, 'app', { showUnchanged: showAll, checks: checks, checkable: !!checks, hideDone: !!App.changesHideDone && !!checks });
     else doc.appendChild(el('div', { class: 'empty' }, [el('p', { text: 'This page matches the original so far. Edits you make are listed here, ready to export as a change list for whoever updates the page in Jadu.' })]));
+    if (diff.total && window.UOL_CLOUD && window.UOL_CLOUD.configured() && !cloudReady()) doc.insertBefore(el('p', { class: 'small muted', text: 'Sign in on the Cloud screen (with this project in the cloud) to tick off each change as it is made in Jadu.' }), doc.firstChild);
+    doc.addEventListener('change', function (e) { var box = e.target.closest('.cl-check__box'); if (box) tickJadu(box); });
     doc.addEventListener('click', function (e) { var b = e.target.closest('.cl-show'); if (b) showBlockInPage(b.getAttribute('data-block')); });
     host.appendChild(doc);
     host.scrollTop = scroll;
@@ -1362,13 +1499,15 @@
   }
   /* format: 'word' downloads a .doc; 'pdf' opens the print window, where "Save as PDF" keeps the text selectable */
   function exportChangeList(pages, format, title) {
-    var sections = pages.filter(function (p) { return p.source && p.source.original; }).map(function (p) { return { page: p, diff: pageDiff(p), meta: { signoff: signoffText(p.id) } }; });
-    if (!sections.length) { toast('None of these pages has an original to compare with', 'warn'); return; }
+    pages = pages.filter(function (p) { return p.source && p.source.original; });
+    if (!pages.length) { toast('None of these pages has an original to compare with', 'warn'); return; }
     var C = window.UOL_CLOUD, user = C && C.user();
     var name = title || (pages.length === 1 ? 'Changes for Jadu: ' + pages[0].title : 'Changes for Jadu');
-    var html = RV.changeListDocument(sections, { title: name, by: user && user.email });
     var file = 'changes-for-jadu-' + (pages.length === 1 ? pages[0].slug : Store.slugify(title || 'all-pages'));
-    M.inline(html).then(function (h) {
+    (cloudReady() ? C.review.jaduChecks(pages.length === 1 ? pages[0].id : null).then(checksByPage, function () { return {}; }) : Promise.resolve(null)).then(function (checks) {
+      var sections = pages.map(function (p) { return { page: p, diff: pageDiff(p), meta: { signoff: signoffText(p.id), checks: checks ? checks[p.id] || {} : null } }; });
+      return M.inline(RV.changeListDocument(sections, { title: name, by: user && user.email }));
+    }).then(function (h) {
       if (format === 'word') { X.download(new Blob(['﻿', h], { type: 'application/msword' }), file + '.doc'); toast('Change list downloaded', 'success'); return; }
       printHtml(h);
     });
@@ -1485,6 +1624,7 @@
     reviewEls = {};
     var so = section('Sign-off', true); reviewEls.signoff = so.body; body.appendChild(so.el);
     var ch = section('Changes for Jadu', true); renderChangesSummary(ch.body); body.appendChild(ch.el);
+    if (cloudReady() && !(pageJadu() && pageJadu().loaded)) loadJadu(false);
     var ck = section('Check page', true), res = renderCheck(ck.body);
     ck.el.querySelector('summary').appendChild(res.errors ? countPill(res.errors, 'error', res.errors + ' to fix') : res.warnings ? countPill(res.warnings, 'warn', res.warnings + ' to look at') : countPill(0, 'ok', 'OK'));
     body.appendChild(ck.el);
@@ -1498,8 +1638,9 @@
     if (App.focusComment && reviewEls.commentInput) { App.focusComment = false; setTimeout(function () { reviewEls.commentInput.focus(); cm.el.scrollIntoView({ block: 'nearest' }); }, 0); }
   }
   function renderChangesSummary(box) {
-    var d = pageDiff(App.page);
-    box.appendChild(el('p', { class: 'small', text: !d ? 'No original to compare with yet.' : d.total ? 'Changed since the original: ' + RV.countsLine(d) + '.' : 'No changes from the original yet.' }));
+    var d = pageDiff(App.page), j = pageJadu(), prog = d && d.total && j && j.loaded ? RV.progress(d, j.checks) : null;
+    if (reviewEls) reviewEls.changes = box;
+    box.appendChild(el('p', { class: 'small', text: !d ? 'No original to compare with yet.' : d.total ? 'Changed since the original: ' + RV.countsLine(d) + '.' + (prog ? ' Done in Jadu: ' + prog.done + ' of ' + prog.total + '.' : '') : 'No changes from the original yet.' }));
     box.appendChild(el('div', { class: 'row' }, [
       el('button', { class: 'btn btn--sm', type: 'button', onclick: function () { if (Preview.setMode) Preview.setMode('changes'); } }, ['View changes']),
       d && d.total ? el('button', { class: 'btn btn--sm', type: 'button', onclick: function () { exportChangeList([App.page], 'word'); } }, ['Word']) : null,
@@ -1591,8 +1732,10 @@
     var acts = [];
     if (mine || (l && l.role !== 'viewer')) acts.push(el('button', { type: 'button', class: 'btn btn--xs', onclick: function () { C.review.resolveComment(c.id, !c.resolved_at).then(function () { loadReview(true); }, cloudError); } }, [c.resolved_at ? 'Reopen' : 'Resolve']));
     if (mine || (l && l.role === 'owner')) acts.push(el('button', { type: 'button', class: 'btn btn--xs btn--danger-ghost', onclick: function () { UI.confirm('Delete comment', 'Delete this comment for everyone?', 'Delete', true).then(function (ok) { if (ok) C.review.deleteComment(c.id).then(function () { loadReview(true); }, cloudError); }); } }, ['Delete']));
-    return el('div', { class: 'comment' + (c.resolved_at ? ' is-resolved' : '') }, [
-      el('div', { class: 'comment__head' }, [el('strong', { title: c.author_email || '', text: mine ? 'You' : who(c.author_email) }), el('span', { class: 'small muted', text: fmtTime(c.created_at) })]),
+    var name = c.guest_name ? c.guest_name : mine ? 'You' : who(c.author_email);
+    return el('div', { class: 'comment' + (c.resolved_at ? ' is-resolved' : '') + (c.guest_name ? ' comment--guest' : '') }, [
+      el('div', { class: 'comment__head' }, [el('strong', { title: c.author_email || '', text: name }), el('span', { class: 'small muted', text: fmtTime(c.created_at) })]),
+      c.guest_name ? el('div', { class: 'comment__via', text: 'Reviewer, through the link "' + (c.guest_via || 'review link') + '"' }) : null,
       target,
       el('div', { class: 'comment__body', text: c.body }),
       c.resolved_at ? el('div', { class: 'small muted', text: 'Resolved by ' + who(c.resolved_by_email) + ', ' + fmtTime(c.resolved_at) }) : null,
@@ -1634,9 +1777,15 @@
     if (!cloudReady()) return;
     var C = window.UOL_CLOUD;
     var fresh = App.reviewSummaryAt && Date.now() - App.reviewSummaryAt < 30000;
-    (fresh ? Promise.resolve(null) : C.review.summary().then(function (rows) { App.reviewSummary = {}; (rows || []).forEach(function (r) { App.reviewSummary[r.page_id] = r; }); App.reviewSummaryAt = Date.now(); })).then(function () {
+    (fresh ? Promise.resolve(null) : Promise.all([C.review.summary(), C.review.jaduChecks(null).catch(function () { return []; })]).then(function (res) {
+      App.reviewSummary = {}; (res[0] || []).forEach(function (r) { App.reviewSummary[r.page_id] = r; });
+      App.jaduChecks = checksByPage(res[1]);
+      App.reviewSummaryAt = Date.now();
+    })).then(function () {
       root.querySelectorAll('[data-signoff]').forEach(function (td) {
         td.querySelectorAll('.signoff__pill, .comment-count').forEach(function (n) { n.remove(); });
+        var jpPage = Store.getPage(td.getAttribute('data-signoff')), jp = jpPage ? jaduProgress(jpPage) : null;
+        if (jp && jp.done) td.appendChild(el('span', { class: 'signoff__pill signoff__pill--sm signoff__pill--' + (jp.done >= jp.total ? 'approved' : 'in_review'), title: jp.done + ' of ' + jp.total + ' changes done in Jadu', text: jp.done >= jp.total ? 'Done in Jadu' : 'Jadu ' + jp.done + '/' + jp.total }));
         var s = App.reviewSummary && App.reviewSummary[td.getAttribute('data-signoff')], p = Store.getPage(td.getAttribute('data-signoff'));
         if (!s || !p) return;
         if (s.status && s.status !== 'not_started') {
@@ -1692,17 +1841,21 @@
     name.value = defName();
     scope.addEventListener('change', function () { name.value = defName(); });
     var msg = el('p', { class: 'small', role: 'alert' });
+    var allow = el('input', { type: 'checkbox', checked: true });
     UI.modal({ title: 'Share a review link', body: el('div', {}, [
-      el('p', { class: 'small', text: 'Anyone with the link can view a copy of the pages as they are now, without an account. Later edits only show once you update the link on the Cloud screen. Reviewers cannot edit or comment, and see nothing else in the project.' }),
+      el('p', { class: 'small', text: 'Anyone with the link can view a copy of the pages as they are now, without an account. Later edits only show once you update the link on the Cloud screen. Reviewers cannot edit, and see nothing else in the project.' }),
       el('label', { class: 'field' }, [el('span', { class: 'field__label', text: 'What to share' }), scope]),
       el('label', { class: 'field' }, [el('span', { class: 'field__label', text: 'Name shown to reviewers' }), name]),
+      el('label', { class: 'check small' }, [allow, el('span', { text: 'Let reviewers comment, with their name. Their comments appear on the Review tab.' })]),
       msg
     ]), buttons: [{ label: 'Cancel' }, { label: 'Create link', primary: true, onClick: function (api) {
       var data; try { data = shareData(scope.value); } catch (e) { msg.className = 'small error'; msg.textContent = e.message; return false; }
       if (App.dirty) saveNow();
       msg.className = 'small muted'; msg.textContent = 'Creating the link…';
       var sc = scope.value;
-      C.shares.create(name.value.trim() || defName(), sc, data, imageProgress).then(function (token) { api.close(); linkReadyDialog(reviewUrl(token, sc), name.value.trim() || defName()); }, function (e) { msg.className = 'small error'; msg.textContent = e.message; });
+      C.shares.create(name.value.trim() || defName(), sc, data, imageProgress).then(function (token) {
+        return (allow.checked ? Promise.resolve() : C.shares.setComments(token, false)).then(function () { api.close(); linkReadyDialog(reviewUrl(token, sc), name.value.trim() || defName()); });
+      }).catch(function (e) { msg.className = 'small error'; msg.textContent = e.message; });
       return false;
     } }] });
   }
@@ -1724,8 +1877,9 @@
         rows.forEach(function (r) {
           var url = reviewUrl(r.token, r.scope);
           box.appendChild(el('div', { class: 'rev' }, [
-            el('div', {}, [el('strong', { text: r.name }), el('div', { class: 'small muted', text: scopeText(r) + ' · copy from ' + fmtTime(r.updated_at) + (r.created_by_email ? ' · made by ' + who(r.created_by_email) : '') })]),
+            el('div', {}, [el('strong', { text: r.name }), el('div', { class: 'small muted', text: scopeText(r) + ' · copy from ' + fmtTime(r.updated_at) + (r.created_by_email ? ' · made by ' + who(r.created_by_email) : '') + ' · ' + (r.allow_comments === false ? 'comments off' : (r.guest_comments || 0) + ' comment' + (r.guest_comments === 1 ? '' : 's') + ' from reviewers') })]),
             el('div', {}, [
+              el('button', { class: 'btn btn--xs', type: 'button', title: r.allow_comments === false ? 'Let reviewers comment through this link' : 'Stop new comments through this link (existing ones stay)', onclick: function () { C.shares.setComments(r.token, r.allow_comments === false).then(function () { toast(r.allow_comments === false ? 'Reviewers can comment' : 'Comments turned off for this link', 'success'); load(); }, cloudError); } }, [r.allow_comments === false ? 'Allow comments' : 'Turn off comments']),
               el('button', { class: 'btn btn--xs', type: 'button', onclick: function () { X.copyText(url).then(function () { toast('Link copied', 'success'); }); } }, ['Copy link']),
               el('a', { class: 'btn btn--xs', href: url, target: '_blank', rel: 'noopener' }, ['Open']),
               el('button', { class: 'btn btn--xs', type: 'button', title: 'Replace the copy with the pages as they are now; the link stays the same', onclick: function () {
@@ -2197,16 +2351,15 @@
   /* ================= export / project view ================= */
   function exportView() {
     var c = ctx(), pages = c.pages;
-    var usage = Math.round(Store.storageUsage() / 1024);
-    var snapList = el('div');
-    function renderSnaps() {
-      snapList.innerHTML = '';
-      var snaps = getSnapshots();
+    var snapList = el('div'), snapCount = 0;
+    function renderSnaps() { getSnapshots().then(showSnaps); }
+    function showSnaps(snaps) {
+      snapList.innerHTML = ''; snapCount = snaps.length;
       if (!snaps.length) snapList.appendChild(el('p', { class: 'muted small', text: 'No snapshots yet.' }));
       snaps.forEach(function (s) {
         snapList.appendChild(el('div', { class: 'rev' }, [el('div', {}, [el('strong', { text: s.name }), el('div', { class: 'small muted', text: fmtTime(s.at) + ' · ' + s.pages + ' pages' })]), el('div', {}, [
-          el('button', { class: 'btn btn--sm', type: 'button', onclick: function () { UI.confirm('Restore snapshot', 'Replace everything in the project with snapshot "' + s.name + '"? A snapshot of the current state is taken first.', 'Restore').then(function (ok) { return ok && beforeReplaceAll('Restore snapshot'); }).then(function (ok) { if (!ok) return; saveSnapshot('Before restoring ' + s.name); Store.importJson(JSON.stringify(s.data)).then(function () { toast('Snapshot restored', 'success'); go('#pages'); }); }); } }, ['Restore']),
-          el('button', { class: 'btn btn--sm btn--danger-ghost', type: 'button', onclick: function () { var l = getSnapshots().filter(function (x) { return x.id !== s.id; }); localStorage.setItem(SNAP_KEY, JSON.stringify(l)); renderSnaps(); } }, ['✕'])
+          el('button', { class: 'btn btn--sm', type: 'button', onclick: function () { UI.confirm('Restore snapshot', 'Replace everything in the project with snapshot "' + s.name + '"? A snapshot of the current state is taken first.', 'Restore').then(function (ok) { return ok && beforeReplaceAll('Restore snapshot'); }).then(function (ok) { if (!ok) return; saveSnapshot('Before restoring ' + s.name).then(function () { return Store.importJson(JSON.stringify(s.data)); }).then(function () { toast('Snapshot restored', 'success'); go('#pages'); }); }); } }, ['Restore']),
+          el('button', { class: 'btn btn--sm btn--danger-ghost', type: 'button', 'aria-label': 'Delete snapshot ' + s.name, onclick: function () { getSnapshots().then(function (l) { return putSnapshots(l.filter(function (x) { return x.id !== s.id; })); }).then(renderSnaps); } }, ['✕'])
         ])]));
       });
     }
@@ -2236,7 +2389,9 @@
     return el('div', { class: 'page-wrap page-wrap--narrow' }, [
       el('div', { class: 'panel' }, [
         el('h2', { text: '1. Autosave in this browser' }),
-        el('p', { text: 'Every change is saved straight away (' + usage + ' KB of browser storage used for content; images are kept separately in the browser\'s database). This alone does not survive a browser reset or a new computer, so also do one of the next two.' })
+        el('p', { text: 'Every change is saved straight away. This alone does not survive a browser reset or a new computer, so also do one of the next two (or use the cloud).' }),
+        storageMeter(),
+        el('div', { class: 'row' }, [el('button', { class: 'btn btn--sm', type: 'button', onclick: freeSpaceDialog }, ['Free up space'])])
       ]),
       el('div', { class: 'panel' }, [
         el('h2', { text: '2. Link a project folder (safest, Edge or Chrome)' }),
@@ -2256,7 +2411,7 @@
       ]),
       el('div', { class: 'panel' }, [
         el('h2', { text: 'Snapshots (whole project, kept in this browser)' }),
-        el('div', { class: 'row' }, [el('button', { class: 'btn btn--primary btn--sm', type: 'button', onclick: function () { UI.prompt('Save snapshot', 'Snapshot name', 'Snapshot ' + (getSnapshots().length + 1), 'Save').then(function (n) { if (n) { saveSnapshot(n); renderSnaps(); } }); } }, ['Take a snapshot'])]),
+        el('div', { class: 'row' }, [el('button', { class: 'btn btn--primary btn--sm', type: 'button', onclick: function () { UI.prompt('Save snapshot', 'Snapshot name', 'Snapshot ' + (snapCount + 1), 'Save').then(function (n) { if (n) saveSnapshot(n).then(renderSnaps); }); } }, ['Take a snapshot'])]),
         snapList
       ]),
       el('div', { class: 'panel' }, [
@@ -2280,6 +2435,7 @@
     var bits = [ROLE_TEXT[s.link.role] || s.link.role];
     if (s.status.message) bits.push(s.status.message);
     if (s.link.lastSync) bits.push('last cloud save ' + fmtTime(s.link.lastSync));
+    if (s.live) bits.push('live updates on');
     return bits.join(' · ');
   }
   function cloudError(e) { toast(e && e.message ? e.message : String(e), 'error', 7000); }
@@ -2346,6 +2502,7 @@
         ])
       ]));
       if (C.canEdit()) wrap.appendChild(reviewLinksPanel());
+      wrap.appendChild(notifyPanel());
     } else {
       var name = el('input', { class: 'input', type: 'text', value: (Store.data.site && Store.data.site.name) || 'Leeds prototype', 'aria-label': 'Cloud project name' });
       wrap.appendChild(el('div', { class: 'panel panel--cloud' }, [
@@ -2384,6 +2541,21 @@
     }, function (e) { listBox.innerHTML = ''; listBox.appendChild(el('p', { class: 'error small', text: 'Could not load projects: ' + e.message })); });
     return wrap;
   }
+  /* each person's email choices for this project; only shown once notifications are set up in Supabase */
+  function notifyPanel() {
+    var C = window.UOL_CLOUD, box = el('div', {}, [el('p', { class: 'small muted', text: 'Loading…' })]);
+    C.notify.prefs().then(function (p) {
+      box.innerHTML = '';
+      if (!p.available) { box.appendChild(el('p', { class: 'small muted', text: 'Email notifications are not set up for this site yet. Whoever looks after the Supabase project can switch them on (DEPLOY.md, part 7).' })); return; }
+      var so = el('input', { type: 'checkbox', checked: !!p.signoff }), cm = el('input', { type: 'checkbox', checked: !!p.comments });
+      function save() { C.notify.set(so.checked, cm.checked).then(function () { toast('Email choices saved', 'success', 1500); }, cloudError); }
+      so.addEventListener('change', save); cm.addEventListener('change', save);
+      box.appendChild(el('label', { class: 'check' }, [so, el('span', { text: 'Email me when a page is sent for review, approved or sent back' })]));
+      box.appendChild(el('label', { class: 'check' }, [cm, el('span', { text: 'Email me about new comments, including comments from review links' })]));
+      box.appendChild(el('p', { class: 'small muted', text: 'For this project only. Nobody is emailed about their own actions.' }));
+    }, function (e) { box.innerHTML = ''; box.appendChild(el('p', { class: 'small error', text: e.message })); });
+    return el('div', { class: 'panel' }, [el('h2', { text: 'Email notifications' }), box]);
+  }
   function afterSignIn() {
     var C = window.UOL_CLOUD, l = C && C.link(); if (!l) return;
     // refresh the role (it may have changed) and pick up where this browser left off
@@ -2397,8 +2569,7 @@
     ]);
     UI.modal({ title: 'Open cloud project', body: body, buttons: [{ label: 'Cancel' }, { label: 'Open', primary: true, onClick: function () {
       var first = (l && C.canEdit()) ? C.push() : Promise.resolve();
-      first.then(function () {
-        if (!l) saveSnapshot('Before opening "' + r.name + '" from the cloud');
+      first.then(function () { return l ? null : saveSnapshot('Before opening "' + r.name + '" from the cloud'); }).then(function () {
         toast('Opening "' + r.name + '"…', 'info', 2500);
         return C.openProject(r.id, r.role);
       }).then(function () { App.undo = {}; App.redo = {}; App.page = null; toast('"' + r.name + '" is open', 'success'); go('#pages'); }, cloudError);
@@ -2448,9 +2619,8 @@
           C.canEdit() ? el('button', { class: 'btn btn--sm', type: 'button', onclick: function () {
             UI.confirm('Restore earlier copy', 'Replace "' + l.name + '" with the copy from ' + fmtTime(h.saved_at) + ', for everyone? A snapshot of this browser\'s copy is taken first.', 'Restore').then(function (ok) {
               if (!ok) return;
-              saveSnapshot('Before restoring the cloud copy from ' + fmtTime(h.saved_at));
               m.close();
-              C.restoreHistory(h.id).then(function () { App.undo = {}; App.redo = {}; App.page = null; toast('Restored the copy from ' + fmtTime(h.saved_at), 'success'); go('#pages'); }, cloudError);
+              saveSnapshot('Before restoring the cloud copy from ' + fmtTime(h.saved_at)).then(function () { return C.restoreHistory(h.id); }).then(function () { App.undo = {}; App.redo = {}; App.page = null; toast('Restored the copy from ' + fmtTime(h.saved_at), 'success'); go('#pages'); }, cloudError);
             });
           } }, ['Restore']) : null
         ]));
@@ -2483,9 +2653,9 @@
         '<h2>Finding your way around</h2><p>The icons down the left edge switch between Pages, Media, Import, Save &amp; export, Cloud, Settings and Help (hover for the name). <strong>Settings</strong> holds the screens you need less often: Site (masthead, navigation, banners and footer), Theme (colours, fonts and custom CSS) and Components (every block with the current theme). The bar across the top shows the current screen with its actions; in the editor it holds the page title, path, template and status, undo and redo, the preview width icons, the Preview / HTML switch, the save state dot, <strong>Open page</strong> and a <strong>&#8943;</strong> menu with versions, every export format, duplicate and delete.</p>' +
         '<h2>Editing</h2><ul><li><strong>Click</strong> a block in the preview to select it; a toolbar appears with move up/down, duplicate, delete and "Add below". <strong>Drag ☰</strong> to move a block.</li><li><strong>Hover</strong> a block in the preview and a red <strong>+</strong> appears on a dashed line below it (above it when you hover its top edge): click it to insert a block there. The red <strong>+</strong> in the top bar inserts below the selected block, or at the end. The inserter has search, category chips and your recently used blocks; Enter inserts the first match.</li><li><strong>Double-click text</strong> in the preview to edit it in place. Enter or clicking away saves; Esc cancels.</li><li><strong>Ctrl+click</strong> a link in the preview to follow it.</li><li>The <strong>HTML</strong> switch in the top bar shows the design-system markup of the page or the selected block, with Copy for Jadu.</li><li>The panel on the right is the <strong>inspector</strong>. <strong>Block</strong> lists the page\'s blocks (the outline) until you select one, then shows that block\'s fields; <strong>Page</strong> holds the heading, breadcrumb, banner, side column and versions; <strong>Section</strong> shows where the page sits, lets you step between the pages of its section, reorder them and change the generated navigation.</li><li><strong>Sections</strong> group pages: the side menu, contents list and previous/next links are generated from the pages in a section.</li><li><kbd>Esc</kbd> returns from a block to the outline.</li></ul>' +
         '<h2>Images</h2><p>Every image field has <strong>Library</strong>, <strong>Upload</strong> and placeholder buttons, and accepts a dropped file. The rich text toolbar has an Image button too. Images live in the Media library (browser database, and your project folder when linked), not inside the page, so the project stays small.</p>' +
-        '<h2>Saving</h2><p>Autosave is always on. For safety, <strong>link a project folder</strong> (Save &amp; export): project.json and images are written there after every change. You can also save <strong>versions</strong> of a page (Ctrl+S), take whole-project <strong>snapshots</strong>, and <strong>save a project file</strong> (Ctrl+Shift+S).</p>' +
+        '<h2>Saving</h2><p>The working copy lives in about 5 MB of browser storage. Save &amp; export shows what uses it; the CMS warns when it is 70% and 90% full, and <strong>Free up space</strong> removes older page versions or the originals of finished pages. Snapshots and images are kept in the browser\'s database, which has far more room.</p><p>Autosave is always on. For safety, <strong>link a project folder</strong> (Save &amp; export): project.json and images are written there after every change. You can also save <strong>versions</strong> of a page (Ctrl+S), take whole-project <strong>snapshots</strong>, and <strong>save a project file</strong> (Ctrl+Shift+S).</p>' +
         '<h2>Cloud and sharing</h2><p>Once cloud saving is set up (see <code>DEPLOY.md</code>), the <strong>Cloud</strong> screen lets you sign in, upload this project, and share it with colleagues to view or edit. Changes are saved here first and uploaded a few seconds later; colleagues\' changes arrive every minute. Different pages edited at the same time are merged; if two people change the same page, the more recent edit is kept and the other person is told. The chip next to <strong>Saved</strong> in the top bar shows the cloud state, and <strong>Earlier copies</strong> on the Cloud screen restores an hourly cloud copy.</p>' +
-        '<h2>Review and sign-off</h2><ul><li><strong>Changes</strong> in the editor\'s top bar lists everything changed since the original leeds.ac.uk page: blocks added, removed, edited and moved, with the text differences marked. Imported pages keep an untouched copy of the original for this; for other pages, fetch the live page or use the page as it is now. <strong>Word</strong> and <strong>PDF</strong> turn it into a change list for whoever edits the page in Jadu. Save &amp; export has change lists for every page.</li><li>The <strong>Review</strong> tab in the inspector checks the page (alt text, heading levels, link text, links to missing pages and other websites), shows the sign-off status and holds comments. Click a block in the preview while on the Review tab to comment on that block.</li><li><strong>Sign-off</strong>: send a page for review; anyone the project is shared with can approve it or request changes. Each step records who and when, and the tab says if the page was edited after it was approved. Sign-off and comments are saved in the cloud.</li><li><strong>Review links</strong> (editor &#8943; menu, Review tab or Cloud screen) give reviewers without an account a read-only copy of a page, a section or the whole project. Update a link on the Cloud screen to show the latest version.</li></ul>' +
+        '<h2>Review and sign-off</h2><ul><li><strong>Changes</strong> in the editor\'s top bar lists everything changed since the original leeds.ac.uk page: blocks added, removed, edited and moved, with the text differences marked. Imported pages keep an untouched copy of the original for this; for other pages, fetch the live page or use the page as it is now. <strong>Word</strong> and <strong>PDF</strong> turn it into a change list for whoever edits the page in Jadu. Save &amp; export has change lists for every page.</li><li>The <strong>Review</strong> tab in the inspector checks the page (alt text, heading levels, link text, links to missing pages and other websites), shows the sign-off status and holds comments. Click a block in the preview while on the Review tab to comment on that block.</li><li><strong>Sign-off</strong>: send a page for review; anyone the project is shared with can approve it or request changes. Each step records who and when, and the tab says if the page was edited after it was approved. Sign-off and comments are saved in the cloud.</li><li><strong>Review links</strong> (editor &#8943; menu, Review tab or Cloud screen) give reviewers without an account a read-only copy of a page, a section or the whole project. Update a link on the Cloud screen to show the latest version. Reviewers can comment with their name, on the page or on a part they pick; their comments appear on the Review tab. Turn comments off for a link on the Cloud screen.</li><li><strong>Jadu checklist</strong>: in Changes, whoever updates Jadu ticks each change off as it is made. Progress shows in the bar and on the Pages screen; a change edited again after it was ticked is marked so. Change lists in Word and PDF have tick boxes.</li><li><strong>Live updates</strong>: with the cloud, comments, sign-off, ticks and colleagues\' saves arrive within seconds. <strong>Email notifications</strong> are optional (DEPLOY.md, part 7); choose yours on the Cloud screen.</li></ul>' +
         '<h2>Keyboard shortcuts</h2><ul><li><kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Y</kbd> undo / redo (outside text fields)</li><li><kbd>/</kbd> open the block inserter (outside text fields)</li><li><kbd>Ctrl</kbd>+<kbd>K</kbd> insert a link while editing rich text</li><li><kbd>Ctrl</kbd>+<kbd>S</kbd> save a version of the page</li><li><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd> save the project to file</li><li><kbd>Esc</kbd> close dialogs / cancel in-place editing</li></ul>' +
         '<h2>Linking pages</h2><p>Give links the path of another page in this project (for example <code>/about</code>) and they navigate between pages in the viewer and in HTML exports.</p>' +
         '<h2>Fonts</h2><p>Freight fonts load from Adobe Fonts when you are online; otherwise the design system fallback fonts are used.</p>'
@@ -2519,7 +2689,8 @@
     if (dupes) toast('Removed ' + dupes + ' duplicated side-column item' + (dupes === 1 ? '' : 's') + ' left by an earlier import', 'success', 6000);
     setupCloud();
     M.open().then(function () {
-      return migrateDataUrls().then(function (n) { if (n) toast(n + ' embedded image' + (n === 1 ? '' : 's') + ' moved out of the page content into the Media library', 'success', 6000); });
+      if (navigator.storage && navigator.storage.persist) navigator.storage.persisted().then(function (p) { if (!p) navigator.storage.persist(); }).catch(function () {});
+      return migrateSnapshots().then(function () { return migrateDataUrls(); }).then(function (n) { if (n) toast(n + ' embedded image' + (n === 1 ? '' : 's') + ' moved out of the page content into the Media library', 'success', 6000); });
     }).then(function () { return reconnectFolder(); }).then(function (connected) {
       route();
       updateSaveStatus();
@@ -2531,6 +2702,7 @@
   /* how the editor reacts to the cloud: status in the top bar, colleagues' changes, images arriving */
   function setupCloud() {
     var C = window.UOL_CLOUD; if (!C) return;
+    C.on(function () { var s = document.getElementById('cloud-current-status'); if (s) s.textContent = cloudStatusText(); });
     C.setHooks({
       onStatus: function () { renderCloudChip(); var s = document.getElementById('cloud-current-status'); if (s) s.textContent = cloudStatusText(); },
       onApplied: function (info) {
@@ -2545,6 +2717,13 @@
           } else if (info.site || info.sections) reloadPreview(true);
         } else if (v === 'pages' || v === 'cloud' || ((v === 'site' || v === 'theme') && info.site)) route();
         else if (info.pages.length || info.sections) toast('Colleagues\' changes brought in from the cloud', 'info', 3000);
+      },
+      /* a colleague commented, signed off or ticked a Jadu change: refresh just that */
+      onLive: function (info) {
+        if (info.mine) return;
+        App.reviewSummaryAt = 0;
+        if (App.view === 'edit' && App.page && (!info.pageId || info.pageId === App.page.id)) { if (info.kind === 'jadu') loadJadu(true); else loadReview(true); }
+        else if (App.view === 'pages') fillSignoffChips(document.getElementById('app'));
       },
       onMedia: function (n) {
         if (App.view === 'edit' || App.view === 'site' || App.view === 'theme') reloadPreview(true);

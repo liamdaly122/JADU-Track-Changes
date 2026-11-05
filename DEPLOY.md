@@ -200,20 +200,50 @@ The extension and the bookmarklet send pages to `https://jadutrackchange.vercel.
 
 ---
 
-## Part 6: Sign-off, comments and review links
+## Part 6: Sign-off, comments, review links, the Jadu checklist and live updates
 
-These features keep their data in Supabase, so the database needs the extra tables and functions in the latest `supabase/setup.sql`.
+These features keep their data in Supabase, so the database needs the extra tables and functions in the latest `supabase/setup.sql`. Run it again whenever the file changes on GitHub.
 
 1. On GitHub, open `supabase/setup.sql` and copy the whole file.
 2. In Supabase, go to **SQL Editor**, click **New query**, paste it in and click **Run**. It should say "Success. No rows returned".
 
-Running the file again is safe: it only adds what is missing and keeps every project, image and account. It also creates a second storage bucket, `cms-shares`, which holds the images in review links.
+Running the file again is safe: it only adds what is missing and keeps every project, image, comment and account. It also creates a second storage bucket, `cms-shares`, which holds the images in review links, and adds a table to Supabase Realtime for live updates. Realtime is on by default in Supabase, so there is nothing else to switch on; the Cloud screen says "live updates on" once it is working.
 
 Then, in the editor:
 
 - **Changes** in the top bar lists what changed since the original leeds.ac.uk page, with **Word** and **PDF** change lists for Jadu.
 - The **Review** tab on the right checks the page, and holds sign-off and comments.
-- **Share a review link** in the ⋯ menu makes a read-only link for reviewers without an account. Manage links on the **Cloud** screen.
+- **Share a review link** in the ⋯ menu makes a read-only link for reviewers without an account, who can comment with their name. Manage links on the **Cloud** screen.
+
+---
+
+## Part 7: Email notifications (optional)
+
+The CMS can email people when a page is sent for review, approved or sent back, and when someone comments. It sends through **Resend** (resend.com), an email service with a free plan (3,000 emails a month, 100 a day). Supabase sends the emails itself, so nothing is added to the website and the key stays in Supabase.
+
+**Before you start.** Resend only delivers to other people once you have verified a domain you control, by adding a few DNS records. For a `leeds.ac.uk` sender address that means asking IT. Until then, Resend delivers only to the address you signed up with, which is enough to try it out.
+
+1. **Resend account.** Go to resend.com and sign up (you can use GitHub).
+2. **Domain.** In Resend, open **Domains**, click **Add Domain** and follow the steps to add its DNS records. Skip this to test with your own address only.
+3. **API key.** Open **API Keys**, click **Create API Key**, give it **Sending access** and copy the key (it starts `re_`).
+4. **Store the key in Supabase.** In **SQL Editor**, run this with your key in place of the example. Vault keeps it encrypted.
+   ```sql
+   select vault.create_secret('re_your_key_here', 'resend_api_key');
+   ```
+5. **Switch notifications on.** Run this, with your sender address and the site address. For testing without a domain, use `onboarding@resend.dev` as the sender.
+   ```sql
+   update public.notify_settings
+      set enabled = true,
+          from_address = 'Leeds prototyping CMS <cms@your-domain.ac.uk>',
+          site_url = 'https://jadutrackchange.vercel.app/'
+    where id = 1;
+   ```
+6. **Check pg_net is on.** In Supabase, **Database**, **Extensions**: `pg_net` should be enabled. `setup.sql` turns it on when it can.
+7. **Choose what to get.** Everyone now sees **Email notifications** on the Cloud screen, per project: sign-off changes (on by default) and new comments (off by default). Nobody is emailed about their own actions.
+
+To switch emails off again: `update public.notify_settings set enabled = false where id = 1;`
+
+If emails do not arrive, the **Logs** page in Resend shows what it received, and in Supabase `select * from net._http_response order by created desc limit 10;` shows Resend's replies. A failed email never stops a comment or sign-off from saving.
 
 ---
 
@@ -231,6 +261,9 @@ Then, in the editor:
 | Import by URL fails online | Only leeds.ac.uk addresses are allowed. Use the grabber or paste the HTML for anything else. |
 | "The cloud database needs an update for this feature" | Run the whole of `supabase/setup.sql` again (Part 6). |
 | A review link says it does not work | The link was deleted, or only part of it was copied. Copy it again from the Cloud screen. |
+| "Browser storage is …% full" | Click **Free up space**: remove older page versions, or the originals of finished pages. Save & export shows what takes the room. |
+| The Cloud screen never says "live updates on" | Nothing is lost: colleagues' changes still arrive within a minute. Check Realtime is enabled for the project in Supabase (Project Settings). |
+| No notification emails | See the end of part 7. |
 
 ## What the new files do
 
