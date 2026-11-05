@@ -227,6 +227,8 @@
 
   /* ---------- blocks ---------- */
   function blockWrap(block, html, ctx) {
+    // review copies with comments only need to know which block is which, not the editing hooks
+    if (ctx && ctx.markBlocks && !ctx.editor) return '<div class="uol-cms-block" data-block-id="' + attr(block.id) + '" data-block-type="' + attr(block.type) + '">' + html + '</div>';
     if (!(ctx && ctx.editor)) return html;
     var a = annotate(block, html);
     var extra = a.whole ? ' data-uol-edit="' + attr(a.whole.path) + '" data-uol-kind="' + a.whole.kind + '"' + (a.whole.multiline ? ' data-uol-ml="1"' : '') : '';
@@ -467,7 +469,7 @@
       js = '<script src="' + base + 'assets/ds/scripts/modernizr-custom.js"></script><script src="' + base + 'assets/ds/scripts/bundle.js"></script>';
     }
     var editorBits = opts.editor ? '<style>' + EDITOR_CSS + '</style>' : '';
-    var ctx = { editor: !!opts.editor, pages: opts.pages || [], sections: opts.sections || [] };
+    var ctx = { editor: !!opts.editor, markBlocks: !!opts.markBlocks, pages: opts.pages || [], sections: opts.sections || [] };
     var body = opts.bodyOverride || renderBody(site, page, ctx);
     var title = (page.settings && page.settings.heading && page.settings.heading.title) || page.title || 'Page';
     var linkMode = opts.linkMode || (opts.editor ? 'editor' : 'view');

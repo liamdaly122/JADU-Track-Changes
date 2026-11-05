@@ -274,6 +274,10 @@ create table if not exists public.page_comments (
   resolved_by uuid references auth.users (id) on delete set null
 );
 create index if not exists page_comments_page_idx on public.page_comments (project_id, page_id, created_at);
+-- comments left through a review link carry the reviewer's name and the link instead of an account
+alter table public.page_comments add column if not exists guest_name text check (guest_name is null or char_length(guest_name) between 1 and 80);
+alter table public.page_comments add column if not exists guest_via text;
+alter table public.page_comments add column if not exists share_token text;
 
 -- every sign-off step is kept, so there is a record of who approved what and when
 create table if not exists public.page_signoffs (
@@ -302,11 +306,12 @@ grant select on public.page_comments, public.page_signoffs to authenticated;
 revoke all on public.page_comments, public.page_signoffs from anon;
 
 -- comments on one page (or every page when p_page is null), oldest first
-create or replace function public.page_comment_list(p_project uuid, p_page text)
+drop function if exists public.page_comment_list(uuid, text);
+create function public.page_comment_list(p_project uuid, p_page text)
 returns table (id uuid, page_id text, block_id text, block_label text, body text, author_id uuid, author_email text,
-               created_at timestamptz, resolved_at timestamptz, resolved_by_email text)
+               created_at timestamptz, resolved_at timestamptz, resolved_by_email text, guest_name text, guest_via text)
 language sql stable security definer set search_path = public, auth as $$
-  select c.id, c.page_id, c.block_id, c.block_label, c.body, c.author, a.email::text, c.created_at, c.resolved_at, r.email::text
+  select c.id, c.page_id, c.block_id, c.block_label, c.body, c.author, a.email::text, c.created_at, c.resolved_at, r.email::text, c.guest_name, c.guest_via
     from public.page_comments c
     left join auth.users a on a.id = c.author
     left join auth.users r on r.id = c.resolved_by
@@ -397,6 +402,51 @@ grant execute on function public.page_comment_list(uuid, text), public.add_page_
   public.set_comment_resolved(uuid, boolean), public.delete_page_comment(uuid), public.set_page_signoff(uuid, text, text, text, text),
   public.page_signoff_history(uuid, text), public.page_review_summary(uuid) to authenticated;
 
+-- ---------------------------------------------------------------- Jadu checklist
+-- Whoever makes the changes in Jadu ticks each item of a page's change list. item_hash fingerprints the change as it
+-- was when ticked, so the CMS can tell when a ticked change was edited again. Viewers can tick too.
+
+create table if not exists public.jadu_checks (
+  project_id  uuid not null references public.projects (id) on delete cascade,
+  page_id     text not null,
+  item_key    text not null,
+  item_hash   text not null,
+  done_by     uuid references auth.users (id) on delete set null,
+  done_at     timestamptz not null default now(),
+  primary key (project_id, page_id, item_key)
+);
+alter table public.jadu_checks enable row level security;
+drop policy if exists "see jadu checks on my projects" on public.jadu_checks;
+create policy "see jadu checks on my projects" on public.jadu_checks
+  for select to authenticated using (public.can_read_project(project_id));
+grant select on public.jadu_checks to authenticated;
+revoke all on public.jadu_checks from anon;
+
+-- ticks for one page, or every page when p_page is null
+create or replace function public.jadu_check_list(p_project uuid, p_page text)
+returns table (page_id text, item_key text, item_hash text, done_by_email text, done_at timestamptz)
+language sql stable security definer set search_path = public, auth as $$
+  select j.page_id, j.item_key, j.item_hash, u.email::text, j.done_at
+    from public.jadu_checks j left join auth.users u on u.id = j.done_by
+   where j.project_id = p_project and (p_page is null or j.page_id = p_page) and public.can_read_project(p_project);
+$$;
+
+create or replace function public.set_jadu_check(p_project uuid, p_page text, p_key text, p_hash text, p_done boolean)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  if not public.can_read_project(p_project) then raise exception 'You do not have access to this project'; end if;
+  if p_done then
+    insert into public.jadu_checks (project_id, page_id, item_key, item_hash, done_by)
+      values (p_project, p_page, left(p_key, 200), left(p_hash, 64), auth.uid())
+      on conflict (project_id, page_id, item_key) do update set item_hash = excluded.item_hash, done_by = excluded.done_by, done_at = now();
+  else
+    delete from public.jadu_checks where project_id = p_project and page_id = p_page and item_key = p_key;
+  end if;
+end $$;
+
+revoke execute on function public.jadu_check_list(uuid, text), public.set_jadu_check(uuid, text, text, text, boolean) from public, anon;
+grant execute on function public.jadu_check_list(uuid, text), public.set_jadu_check(uuid, text, text, text, boolean) to authenticated;
+
 -- ---------------------------------------------------------------- review links: a fixed copy anyone with the link can view
 -- A link holds a copy of the project (or one section or page) taken when it was made or last updated, so later
 -- edits do not show until someone updates it. The token in the link is 64 random hex characters. Images are copied
@@ -413,8 +463,16 @@ create table if not exists public.share_links (
   updated_at  timestamptz not null default now()
 );
 create index if not exists share_links_project_idx on public.share_links (project_id);
+alter table public.share_links add column if not exists allow_comments boolean not null default true;
 alter table public.share_links enable row level security;
 revoke all on public.share_links from anon, authenticated;
+-- deleting a link keeps the comments reviewers left through it
+do $$ begin
+  if not exists (select 1 from pg_constraint where conname = 'page_comments_share_token_fkey') then
+    alter table public.page_comments add constraint page_comments_share_token_fkey
+      foreign key (share_token) references public.share_links (token) on delete set null;
+  end if;
+end $$;
 
 create or replace function public.create_share_link(p_project uuid, p_name text, p_scope text, p_data jsonb)
 returns text language plpgsql security definer set search_path = public as $$
@@ -444,28 +502,74 @@ begin
   delete from public.share_links where token = p_token;
 end $$;
 
+create or replace function public.set_share_link_comments(p_token text, p_allow boolean)
+returns void language plpgsql security definer set search_path = public as $$
+declare pid uuid;
+begin
+  select project_id into pid from public.share_links where token = p_token;
+  if pid is null or not public.can_edit_project(pid) then raise exception 'Review link not found'; end if;
+  update public.share_links set allow_comments = p_allow where token = p_token;
+end $$;
+
 -- the links of a project, for its owner and editors (without the copies themselves)
-create or replace function public.share_link_list(p_project uuid)
-returns table (token text, name text, scope text, created_at timestamptz, updated_at timestamptz, created_by_email text, page_count integer)
+drop function if exists public.share_link_list(uuid);
+create function public.share_link_list(p_project uuid)
+returns table (token text, name text, scope text, created_at timestamptz, updated_at timestamptz, created_by_email text, page_count integer,
+               allow_comments boolean, guest_comments integer)
 language sql stable security definer set search_path = public, auth as $$
-  select s.token, s.name, s.scope, s.created_at, s.updated_at, u.email::text, coalesce(jsonb_array_length(s.data -> 'pages'), 0)
+  select s.token, s.name, s.scope, s.created_at, s.updated_at, u.email::text, coalesce(jsonb_array_length(s.data -> 'pages'), 0),
+         s.allow_comments, (select count(*)::integer from public.page_comments c where c.share_token = s.token)
     from public.share_links s left join auth.users u on u.id = s.created_by
    where s.project_id = p_project and public.can_edit_project(p_project)
    order by s.created_at desc;
 $$;
 
 -- what the review page shows; callable without signing in, but only with the full token
-create or replace function public.get_shared_project(p_token text)
-returns table (name text, scope text, data jsonb, updated_at timestamptz)
+drop function if exists public.get_shared_project(text);
+create function public.get_shared_project(p_token text)
+returns table (name text, scope text, data jsonb, updated_at timestamptz, allow_comments boolean)
 language sql stable security definer set search_path = public as $$
-  select s.name, s.scope, s.data, s.updated_at from public.share_links s where s.token = p_token and length(p_token) = 64;
+  select s.name, s.scope, s.data, s.updated_at, s.allow_comments from public.share_links s where s.token = p_token and length(p_token) = 64;
+$$;
+
+-- reviewers without an account comment through the link, with their name; they see only comments made through it
+create or replace function public.add_guest_comment(p_token text, p_page text, p_block text, p_block_label text, p_name text, p_body text)
+returns uuid language plpgsql security definer set search_path = public as $$
+declare s public.share_links; new_id uuid;
+begin
+  select * into s from public.share_links where token = p_token and length(p_token) = 64;
+  if s.token is null then raise exception 'This review link no longer works'; end if;
+  if not s.allow_comments then raise exception 'Comments are turned off for this review link'; end if;
+  if not exists (select 1 from jsonb_array_elements(coalesce(s.data -> 'pages', '[]'::jsonb)) e where e ->> 'id' = p_page) then
+    raise exception 'That page is not part of this review copy';
+  end if;
+  if coalesce(trim(p_name), '') = '' then raise exception 'Add your name so the team knows who the comment is from'; end if;
+  if coalesce(trim(p_body), '') = '' or char_length(p_body) > 2000 then raise exception 'Write a comment of up to 2000 characters'; end if;
+  if (select count(*) from public.page_comments where share_token = p_token and created_at > now() - interval '1 hour') >= 60 then
+    raise exception 'Too many comments through this link in the last hour. Try again later.';
+  end if;
+  insert into public.page_comments (project_id, page_id, block_id, block_label, body, guest_name, guest_via, share_token)
+    values (s.project_id, p_page, nullif(p_block, ''), left(p_block_label, 200), trim(p_body), left(trim(p_name), 80), s.name, p_token)
+    returning id into new_id;
+  return new_id;
+end $$;
+
+create or replace function public.guest_comment_list(p_token text)
+returns table (id uuid, page_id text, block_id text, block_label text, guest_name text, body text, created_at timestamptz, resolved_at timestamptz)
+language sql stable security definer set search_path = public as $$
+  select c.id, c.page_id, c.block_id, c.block_label, c.guest_name, c.body, c.created_at, c.resolved_at
+    from public.page_comments c join public.share_links s on s.token = c.share_token
+   where c.share_token = p_token and length(p_token) = 64 and s.allow_comments
+   order by c.created_at;
 $$;
 
 revoke execute on function public.create_share_link(uuid, text, text, jsonb), public.update_share_link(text, jsonb),
-  public.delete_share_link(text), public.share_link_list(uuid), public.get_shared_project(text) from public, anon;
+  public.delete_share_link(text), public.share_link_list(uuid), public.set_share_link_comments(text, boolean),
+  public.get_shared_project(text), public.add_guest_comment(text, text, text, text, text, text), public.guest_comment_list(text) from public, anon;
 grant execute on function public.create_share_link(uuid, text, text, jsonb), public.update_share_link(text, jsonb),
-  public.delete_share_link(text), public.share_link_list(uuid) to authenticated;
-grant execute on function public.get_shared_project(text) to anon, authenticated;
+  public.delete_share_link(text), public.share_link_list(uuid), public.set_share_link_comments(text, boolean) to authenticated;
+grant execute on function public.get_shared_project(text), public.add_guest_comment(text, text, text, text, text, text),
+  public.guest_comment_list(text) to anon, authenticated;
 
 -- images for review links: "<token>/<image id>" in a public bucket; only the project's editors can add or remove them
 create or replace function public.can_edit_share_media(object_name text)
@@ -491,5 +595,199 @@ create policy "cms shares replace" on storage.objects
 drop policy if exists "cms shares delete" on storage.objects;
 create policy "cms shares delete" on storage.objects
   for delete to authenticated using (bucket_id = 'cms-shares' and public.can_edit_share_media(name));
+
+-- ---------------------------------------------------------------- live updates
+-- One small row per project changes whenever the project, its comments, sign-off or Jadu ticks change. Browsers that
+-- have the project open listen to it through Supabase Realtime and fetch the news within seconds (the access rules
+-- above still apply). The once-a-minute check in the CMS stays as a fallback.
+
+create table if not exists public.project_pings (
+  project_id  uuid primary key references public.projects (id) on delete cascade,
+  kind        text not null default 'project',
+  page_id     text,
+  at          timestamptz not null default now(),
+  by_user     uuid
+);
+alter table public.project_pings enable row level security;
+drop policy if exists "see pings of my projects" on public.project_pings;
+create policy "see pings of my projects" on public.project_pings
+  for select to authenticated using (public.can_read_project(project_id));
+grant select on public.project_pings to authenticated;
+revoke all on public.project_pings from anon;
+
+create or replace function public.ping_project()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare pid uuid; pg text;
+begin
+  if tg_table_name = 'projects' then pid := new.id;
+  elsif tg_op = 'DELETE' then pid := old.project_id; pg := old.page_id;
+  else pid := new.project_id; pg := new.page_id;
+  end if;
+  -- nothing to announce while a project is being deleted
+  if not exists (select 1 from public.projects where id = pid) then return null; end if;
+  insert into public.project_pings (project_id, kind, page_id, at, by_user) values (pid, tg_argv[0], pg, now(), auth.uid())
+    on conflict (project_id) do update set kind = excluded.kind, page_id = excluded.page_id, at = excluded.at, by_user = excluded.by_user;
+  return null;
+end $$;
+
+drop trigger if exists ping_on_project on public.projects;
+create trigger ping_on_project after update on public.projects for each row execute function public.ping_project('project');
+drop trigger if exists ping_on_comment on public.page_comments;
+create trigger ping_on_comment after insert or update or delete on public.page_comments for each row execute function public.ping_project('comments');
+drop trigger if exists ping_on_signoff on public.page_signoffs;
+create trigger ping_on_signoff after insert on public.page_signoffs for each row execute function public.ping_project('signoff');
+drop trigger if exists ping_on_jadu on public.jadu_checks;
+create trigger ping_on_jadu after insert or update or delete on public.jadu_checks for each row execute function public.ping_project('jadu');
+
+do $$ begin
+  if exists (select 1 from pg_publication where pubname = 'supabase_realtime')
+     and not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'project_pings') then
+    alter publication supabase_realtime add table public.project_pings;
+  end if;
+end $$;
+
+-- ---------------------------------------------------------------- email notifications (optional, off until set up)
+-- Emails about sign-off and comments go out through Resend (resend.com) using the pg_net extension. They stay off
+-- until the API key is in the Vault and notify_settings is switched on; DEPLOY.md, part 7, has the steps.
+-- Each person chooses what they get per project on the Cloud screen: sign-off changes (on by default) and new
+-- comments (off by default). Nobody is emailed about their own actions. A failed email never blocks the action.
+
+do $$ begin
+  if exists (select 1 from pg_available_extensions where name = 'pg_net') then create extension if not exists pg_net; end if;
+exception when others then null;
+end $$;
+
+create table if not exists public.notify_settings (
+  id            integer primary key default 1 check (id = 1),
+  enabled       boolean not null default false,
+  from_address  text,
+  site_url      text
+);
+insert into public.notify_settings (id) values (1) on conflict (id) do nothing;
+alter table public.notify_settings enable row level security;
+revoke all on public.notify_settings from anon, authenticated;
+
+create table if not exists public.notify_prefs (
+  user_id     uuid not null references auth.users (id) on delete cascade,
+  project_id  uuid not null references public.projects (id) on delete cascade,
+  signoff     boolean not null default true,
+  comments    boolean not null default false,
+  primary key (user_id, project_id)
+);
+alter table public.notify_prefs enable row level security;
+revoke all on public.notify_prefs from anon, authenticated;
+
+create or replace function public.my_notify_prefs(p_project uuid)
+returns table (available boolean, signoff boolean, comments boolean)
+language plpgsql stable security definer set search_path = public as $$
+declare on_ boolean; so boolean; cm boolean;
+begin
+  if not public.can_read_project(p_project) then return; end if;
+  select coalesce(s.enabled, false) and s.from_address is not null into on_ from public.notify_settings s where s.id = 1;
+  select np.signoff, np.comments into so, cm from public.notify_prefs np where np.user_id = auth.uid() and np.project_id = p_project;
+  return query select coalesce(on_, false), coalesce(so, true), coalesce(cm, false);
+end $$;
+
+create or replace function public.set_notify_prefs(p_project uuid, p_signoff boolean, p_comments boolean)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  if not public.can_read_project(p_project) then raise exception 'You do not have access to this project'; end if;
+  insert into public.notify_prefs (user_id, project_id, signoff, comments) values (auth.uid(), p_project, p_signoff, p_comments)
+    on conflict (user_id, project_id) do update set signoff = excluded.signoff, comments = excluded.comments;
+end $$;
+
+revoke execute on function public.my_notify_prefs(uuid), public.set_notify_prefs(uuid, boolean, boolean) from public, anon;
+grant execute on function public.my_notify_prefs(uuid), public.set_notify_prefs(uuid, boolean, boolean) to authenticated;
+
+-- sends one email; does nothing unless notifications are switched on and the key is in the Vault
+create or replace function public.notify_send(p_to text, p_subject text, p_text text)
+returns void language plpgsql security definer set search_path = public as $$
+declare s public.notify_settings; k text;
+begin
+  select * into s from public.notify_settings where id = 1;
+  if s.id is null or not s.enabled or s.from_address is null or p_to is null then return; end if;
+  begin
+    execute 'select decrypted_secret from vault.decrypted_secrets where name = $1 limit 1' into k using 'resend_api_key';
+  exception when others then return;
+  end;
+  if k is null then return; end if;
+  begin
+    perform net.http_post(
+      url := 'https://api.resend.com/emails',
+      headers := jsonb_build_object('Authorization', 'Bearer ' || k, 'Content-Type', 'application/json'),
+      body := jsonb_build_object('from', s.from_address, 'to', jsonb_build_array(p_to), 'subject', left(p_subject, 200), 'text', p_text));
+  exception when others then raise warning 'Notification email not sent: %', sqlerrm;
+  end;
+end $$;
+
+-- everyone on the project except the person who acted, who wants this kind of email
+create or replace function public.notify_recipients(p_project uuid, p_actor uuid, p_kind text)
+returns table (email text)
+language sql stable security definer set search_path = public, auth as $$
+  select u.email::text
+    from (select p.owner as uid from public.projects p where p.id = p_project
+          union select m.user_id from public.project_members m where m.project_id = p_project) people
+    join auth.users u on u.id = people.uid
+    left join public.notify_prefs np on np.user_id = people.uid and np.project_id = p_project
+   where people.uid is distinct from p_actor
+     and case when p_kind = 'signoff' then coalesce(np.signoff, true) else coalesce(np.comments, false) end;
+$$;
+
+create or replace function public.notify_page_title(p_project uuid, p_page text)
+returns text language sql stable security definer set search_path = public as $$
+  select coalesce((select e ->> 'title' from public.projects p, jsonb_array_elements(coalesce(p.data -> 'pages', '[]'::jsonb)) e
+                    where p.id = p_project and e ->> 'id' = p_page limit 1), 'a page');
+$$;
+
+create or replace function public.notify_footer(p_project uuid, p_page text)
+returns text language sql stable security definer set search_path = public as $$
+  select case when s.site_url is not null and s.site_url <> '' then E'\n\nOpen the page: ' || rtrim(s.site_url, '/') || '/#edit/' || p_page else '' end ||
+         E'\n\nYou get these emails because you work on this project. Change what you get on the Cloud screen of the CMS.'
+    from public.notify_settings s where s.id = 1;
+$$;
+
+create or replace function public.notify_on_signoff()
+returns trigger language plpgsql security definer set search_path = public, auth as $$
+declare proj text; title text; actor text; verb text; r record;
+begin
+  if not exists (select 1 from public.notify_settings where id = 1 and enabled) or new.status = 'not_started' then return null; end if;
+  select name into proj from public.projects where id = new.project_id;
+  title := public.notify_page_title(new.project_id, new.page_id);
+  select email into actor from auth.users where id = new.by_user;
+  verb := case new.status when 'in_review' then 'sent for review' when 'approved' then 'approved' else 'sent back with changes requested' end;
+  for r in select * from public.notify_recipients(new.project_id, new.by_user, 'signoff') loop
+    perform public.notify_send(r.email, '[' || proj || '] "' || title || '" ' || verb,
+      coalesce(actor, 'Someone') || ' ' || verb || ' "' || title || '" in ' || proj || '.' ||
+      case when new.note is not null then E'\n\nNote: ' || new.note else '' end || public.notify_footer(new.project_id, new.page_id));
+  end loop;
+  return null;
+exception when others then raise warning 'Notification not sent: %', sqlerrm; return null;
+end $$;
+
+create or replace function public.notify_on_comment()
+returns trigger language plpgsql security definer set search_path = public, auth as $$
+declare proj text; title text; actor text; r record;
+begin
+  if not exists (select 1 from public.notify_settings where id = 1 and enabled) then return null; end if;
+  select name into proj from public.projects where id = new.project_id;
+  title := public.notify_page_title(new.project_id, new.page_id);
+  if new.guest_name is not null then actor := new.guest_name || ' (reviewer, through the link "' || coalesce(new.guest_via, 'review link') || '")';
+  else select email into actor from auth.users where id = new.author; end if;
+  for r in select * from public.notify_recipients(new.project_id, new.author, 'comments') loop
+    perform public.notify_send(r.email, '[' || proj || '] New comment on "' || title || '"',
+      coalesce(actor, 'Someone') || ' commented on "' || title || '"' || case when new.block_label is not null then ' (' || new.block_label || ')' else '' end || E':\n\n' ||
+      new.body || public.notify_footer(new.project_id, new.page_id));
+  end loop;
+  return null;
+exception when others then raise warning 'Notification not sent: %', sqlerrm; return null;
+end $$;
+
+revoke execute on function public.notify_send(text, text, text), public.notify_recipients(uuid, uuid, text),
+  public.notify_page_title(uuid, text), public.notify_footer(uuid, text) from public, anon, authenticated;
+
+drop trigger if exists notify_signoff on public.page_signoffs;
+create trigger notify_signoff after insert on public.page_signoffs for each row execute function public.notify_on_signoff();
+drop trigger if exists notify_comment on public.page_comments;
+create trigger notify_comment after insert on public.page_comments for each row execute function public.notify_on_comment();
 
 -- Done. Next: Authentication > Users > Add user, for yourself and each colleague (tick "Auto Confirm User").

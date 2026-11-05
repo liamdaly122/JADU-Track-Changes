@@ -44,7 +44,7 @@
 
   /* ---------------------------------------------------------------- session */
   var session = readJson(SESSION_KEY), refreshing = null, listeners = [];
-  function emit() { listeners.forEach(function (fn) { try { fn(api.state()); } catch (e) {} }); }
+  function emit() { ensureLive(); listeners.forEach(function (fn) { try { fn(api.state()); } catch (e) {} }); }
   function setSession(j) {
     session = { access_token: j.access_token, refresh_token: j.refresh_token, expires_at: j.expires_at ? j.expires_at * 1000 : Date.now() + (j.expires_in || 3600) * 1000, user: { id: j.user && j.user.id, email: j.user && j.user.email } };
     writeJson(SESSION_KEY, session);
@@ -65,7 +65,7 @@
     if (!force && session.expires_at - Date.now() > 60000) return Promise.resolve(session.access_token);
     if (refreshing) return refreshing;
     refreshing = authFetch('/auth/v1/token?grant_type=refresh_token', { refresh_token: session.refresh_token })
-      .then(function (j) { setSession(j); refreshing = null; return session.access_token; },
+      .then(function (j) { setSession(j); refreshing = null; liveToken(session.access_token); return session.access_token; },
         function (e) { refreshing = null; if (e.status === 400 || e.status === 401) { clearSession(); emit(); throw notSignedIn(); } throw e; });
     return refreshing;
   }
@@ -204,7 +204,7 @@
   var link = readJson(LINK_KEY);  // { projectId, name, role, version, lastSync }
   var status = { kind: 'idle', message: '' };
   var applying = false, pushing = null, pushAgain = false, pushTimer = null, lastPull = 0;
-  var hooks = { onApplied: function () {}, onMedia: function () {}, onStatus: function () {} };
+  var hooks = { onApplied: function () {}, onMedia: function () {}, onStatus: function () {}, onLive: function () {} };
 
   function saveLink() { writeJson(LINK_KEY, link); }
   function unlink() { link = null; saveLink(); clearTimeout(pushTimer); setStatus('idle', ''); }
@@ -397,7 +397,9 @@
     resolveComment: function (id, resolved) { return rpc('set_comment_resolved', { p_comment: id, p_resolved: !!resolved }); },
     deleteComment: function (id) { return rpc('delete_page_comment', { p_comment: id }); },
     setSignoff: function (pageId, status, note, hash) { return reviewCall('set_page_signoff', { p_page: pageId, p_status: status, p_note: note || null, p_hash: hash || null }); },
-    signoffHistory: function (pageId) { return reviewCall('page_signoff_history', { p_page: pageId }); }
+    signoffHistory: function (pageId) { return reviewCall('page_signoff_history', { p_page: pageId }); },
+    jaduChecks: function (pageId) { return reviewCall('jadu_check_list', { p_page: pageId || null }); },
+    setJaduCheck: function (pageId, key, hash, done) { return reviewCall('set_jadu_check', { p_page: pageId, p_key: key, p_hash: hash, p_done: !!done }); }
   };
 
   /* ---------------------------------------------------------------- review links (read-only copies for people without an account) */
@@ -433,7 +435,69 @@
     update: function (token, data, onProgress) {
       return rpc('update_share_link', { p_token: token, p_data: data }).then(function () { return uploadShareImages(token, data, onProgress); });
     },
-    remove: function (token) { return removeShareImages(token).then(function () { return rpc('delete_share_link', { p_token: token }); }); }
+    remove: function (token) { return removeShareImages(token).then(function () { return rpc('delete_share_link', { p_token: token }); }); },
+    setComments: function (token, allow) { return rpc('set_share_link_comments', { p_token: token, p_allow: !!allow }); }
+  };
+
+  /* ---------------------------------------------------------------- live updates (Supabase Realtime)
+     Listens to the project's row in project_pings, which changes whenever the project, its comments, sign-off or Jadu
+     ticks change, and reacts within seconds. Speaks the Realtime websocket protocol directly, so no library is needed.
+     If the connection fails, it retries with growing gaps; the minute-by-minute checks carry on regardless. */
+  var live = { ws: null, topic: '', ref: 0, beat: null, retry: 0, retryTimer: null, joined: false, projectId: null };
+  function wsUrl() { return base().replace(/^http/i, 'ws') + '/realtime/v1/websocket?apikey=' + encodeURIComponent(key()) + '&vsn=1.0.0'; }
+  function liveSend(msg) { if (live.ws && live.ws.readyState === 1) { msg.ref = String(++live.ref); live.ws.send(JSON.stringify(msg)); } }
+  function liveToken(t) { if (live.joined) liveSend({ topic: live.topic, event: 'access_token', payload: { access_token: t } }); }
+  function liveStop() {
+    clearInterval(live.beat); clearTimeout(live.retryTimer);
+    var was = live.joined;
+    if (live.ws) { live.ws.onclose = null; try { live.ws.close(); } catch (e) {} }
+    live.ws = null; live.joined = false; live.projectId = null;
+    if (was) listeners.forEach(function (fn) { try { fn(api.state()); } catch (e) {} });
+  }
+  function ensureLive() {
+    var want = !!(link && session && configured() && typeof WebSocket !== 'undefined');
+    if (!want) { if (live.ws || live.retryTimer) liveStop(); return; }
+    if (live.projectId === link.projectId && (live.ws || live.retryTimer)) return;
+    liveStart();
+  }
+  function liveStart() {
+    liveStop();
+    var pid = link.projectId;
+    live.projectId = pid;
+    token().then(function (t) {
+      if (!link || link.projectId !== pid || live.projectId !== pid) return;
+      var ws; try { ws = new WebSocket(wsUrl()); } catch (e) { return; }
+      live.ws = ws; live.topic = 'realtime:project-' + pid;
+      ws.onopen = function () {
+        liveSend({ topic: live.topic, event: 'phx_join', join_ref: '1', payload: { config: { broadcast: { ack: false, self: false }, presence: { key: '' }, postgres_changes: [{ event: '*', schema: 'public', table: 'project_pings', filter: 'project_id=eq.' + pid }], private: false }, access_token: t } });
+        live.beat = setInterval(function () { liveSend({ topic: 'phoenix', event: 'heartbeat', payload: {} }); }, 25000);
+      };
+      ws.onmessage = function (e) { var m; try { m = JSON.parse(e.data); } catch (x) { return; } onLive(m); };
+      ws.onclose = function () {
+        clearInterval(live.beat); live.ws = null;
+        var was = live.joined; live.joined = false;
+        if (was) listeners.forEach(function (fn) { try { fn(api.state()); } catch (x) {} });
+        if (link && session && live.projectId === pid) live.retryTimer = setTimeout(function () { live.retryTimer = null; if (live.projectId === pid) liveStart(); }, Math.min(60000, 2000 * Math.pow(2, live.retry++)));
+      };
+      ws.onerror = function () {};
+    }).catch(function () { live.projectId = null; });
+  }
+  function onLive(m) {
+    if (!m || m.topic !== live.topic) return;
+    if (m.event === 'phx_reply' && m.payload && m.payload.status === 'ok' && !live.joined) { live.joined = true; live.retry = 0; listeners.forEach(function (fn) { try { fn(api.state()); } catch (e) {} }); return; }
+    if (m.event === 'phx_reply' && m.payload && m.payload.status === 'error') { try { live.ws.close(); } catch (e) {} return; }
+    if (m.event !== 'postgres_changes') return;
+    var d = (m.payload && m.payload.data) || {}, rec = d.record || d.new || {};
+    var mine = session && session.user && rec.by_user && rec.by_user === session.user.id;
+    if (rec.kind === 'project') { if (!mine && !pushing && Date.now() - lastPull > 1500) pull(false); return; }
+    hooks.onLive({ kind: rec.kind, pageId: rec.page_id || null, mine: !!mine });
+  }
+  document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') ensureLive(); });
+
+  /* ---------------------------------------------------------------- email notification choices (per person, per project) */
+  var notify = {
+    prefs: function () { return reviewCall('my_notify_prefs').then(function (rows) { return (rows && rows[0]) || { available: false, signoff: true, comments: false }; }); },
+    set: function (signoff, comments) { return reviewCall('set_notify_prefs', { p_signoff: !!signoff, p_comments: !!comments }); }
   };
 
   /* every local save schedules an upload */
@@ -451,13 +515,14 @@
     user: function () { return session ? session.user : null; },
     link: function () { return link ? clone(link) : null; },
     canEdit: canEdit,
-    state: function () { return { configured: configured(), user: session ? session.user : null, link: link ? clone(link) : null, status: clone(status) }; },
+    state: function () { return { configured: configured(), user: session ? session.user : null, link: link ? clone(link) : null, status: clone(status), live: live.joined }; },
     listProjects: listProjects, openProject: openProject, uploadAsNew: uploadAsNew, deleteProject: deleteProject, rename: rename,
     members: members, share: share, unshare: unshare, history: history, restoreHistory: restoreHistory,
     push: push, pull: pull, disconnect: disconnect, refreshLink: refreshLink, merge: merge,
-    review: review, shares: shares,
+    review: review, shares: shares, notify: notify, live: function () { return live.joined; },
     on: function (fn) { listeners.push(fn); },
     setHooks: function (h) { Object.keys(h || {}).forEach(function (k) { hooks[k] = h[k]; }); }
   };
   window.UOL_CLOUD = api;
+  setTimeout(ensureLive, 0);
 })();
