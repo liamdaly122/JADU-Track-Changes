@@ -579,7 +579,9 @@
     if (d.uolcms === 'import' && (typeof d.html === 'string' || Array.isArray(d.pages))) {
       if (e.source && e.source.postMessage) { try { e.source.postMessage({ uolcms: 'import-ack' }, '*'); } catch (err) {} }
       var msg = { kind: String(d.kind || 'page'), html: typeof d.html === 'string' ? d.html : '', url: String(d.url || ''), title: String(d.title || ''), pages: Array.isArray(d.pages) ? d.pages : null, failed: Array.isArray(d.failed) ? d.failed : [], assets: d.assets && typeof d.assets === 'object' ? d.assets : null };
-      if (App.view === 'import' && App.onGrabberImport) App.onGrabberImport(msg); else { App.pendingGrab = msg; go('#import'); }
+      if (App.view === 'import' && App.onGrabberImport) App.onGrabberImport(msg);
+      else if (cloudMode() && !Store.data) { App.pendingGrab = msg; toast('Page received. ' + (window.UOL_CLOUD.user() ? 'Open the project it is for' : 'Sign in and open the project it is for') + ', and it goes straight into Import.', 'info', 8000); }
+      else { App.pendingGrab = msg; go('#import'); }
       return;
     }
     var fromPending = Preview.pending && e.source === Preview.pending.contentWindow;
@@ -756,6 +758,8 @@
       if (parts[0] === 'open') { openFromLink(parts[1], parts[2]); return; }
       if (parts[0] === 'cloud') parts[0] = 'sharing';
       if (!Store.data && !NO_PROJECT_VIEWS[parts[0]]) { go('#projects'); return; }
+      // a page the grabber sent before a project was open
+      if (Store.data && App.pendingGrab && parts[0] !== 'import') { go('#import'); return; }
     }
     App.view = parts[0];
     var root = document.getElementById('app');
