@@ -38,15 +38,25 @@ Screens are reached from the icon rail down the left edge (hover an icon for its
 | **Settings** (gear icon, foot of the rail) | Links to the three screens used less often: |
 | &nbsp;&nbsp;**Site** | Global masthead and quicklinks, local masthead, main navigation, global and marketing banners, footer. |
 | &nbsp;&nbsp;**Theme** | Every brand colour token, font stacks, base font size, custom CSS, presets. Updates the preview live. |
-| &nbsp;&nbsp;**Components** | A styleguide of all blocks in their default state with the current theme. |
+| &nbsp;&nbsp;**Components** | A styleguide of all blocks with the current theme, and the **component library** for each kind of page (see below). |
 
 ## Editing in the preview
 
-- **Click** a block to select it. A toolbar appears on it: move up / down, duplicate, delete, **+ Add below**.
-- **Drag the ☰ handle** on that toolbar to move the block anywhere on the page.
+- **Click** a block to select it. A toolbar appears on its top edge with the block's name, move up / down, duplicate, delete and **Add below**.
+- **Drag the dotted handle** at the left of that toolbar to move the block anywhere on the page.
 - **Double-click any text** (headings, paragraphs, card titles, lead text, rich text) to edit it in place. Enter or clicking away saves, Esc cancels. Formatting toolbars are in the side panel's field for that block.
 - **Ctrl+click** a link to follow it (a plain click only selects).
 - The **Preview / HTML** toggle shows the design-system markup for the page, the selected block or the full document, with Copy (for Jadu) and Download.
+
+### Component libraries
+
+Each kind of page has its own library of components, so a prototype only uses what Jadu allows on that kind of page:
+
+- **Homepage**: the widgets as well as everything else (53 components).
+- **Document page**: what the Jadu rich text editor offers, since that is all a Jadu document page holds: rich text, headings, paragraphs, lists, blockquote, pull quote, text highlight, highlight block, in-text calls to action, in-text facts, accordion, table, image, button, arrow link, linked list, status message and raw HTML.
+- **Article**: rich text and the components designed for news, events and profiles.
+
+**Add a block** shows the page's library; **Show them** at the bottom (or a search) lists the rest, greyed out. **Check page** on the Review tab flags any block that is not in the page's library, and changing a page's template says how many blocks fall outside the new library. To change a library for this project, open Settings, **Components**, choose the kind of page and tick or untick components; **Reset to the default** undoes your changes. Libraries are saved with the project, so everyone sharing it uses the same ones.
 
 ## Sections (multi-page documents and site areas)
 
@@ -107,7 +117,7 @@ Images from leeds.ac.uk appear in PNG and PDF exports when the CMS has them: the
 
 **Changes for Jadu.** Every page imported from leeds.ac.uk keeps an untouched copy of the original and its address. **Changes** in the editor's top bar compares the page with that copy and lists what to do in Jadu, in page order: blocks to add (with where they go), remove, edit or move, with text differences marked word by word, changed links and changed images. Blocks are matched by id, or by type and wording when the original was fetched again. **Word** and **PDF** turn the list into a document for whoever edits the page in Jadu (PDF opens the print window; choose *Save as PDF*). *Save & export* has change lists for every page, or all changed pages in one document. For pages imported before this feature, or made in the CMS, the Changes view can fetch the live page as the original (online), or use the page as it is now.
 
-**Check page** (Review tab). Flags images without alt text, empty alt text, a missing or extra H1, skipped heading levels, empty headings, links without text or with vague text ("click here"), links with no address or a placeholder address, embeds without a title and tables without a header row. Each problem shows its block; click it to find the block in the preview. Links to paths that are not pages in this project, and links to other websites, are listed with **Open** buttons for checking by hand.
+**Check page** (Review tab). Flags images without alt text, empty alt text, a missing or extra H1, skipped heading levels, empty headings, links without text or with vague text ("click here"), links with no address or a placeholder address, embeds without a title and tables without a header row. Each problem shows its block; click it to find the block in the preview. Links to paths that are not pages in this project, and links to other websites, are listed with **Open** buttons for checking by hand. It also flags blocks that are not in the page's component library (see Component libraries).
 
 **Sign-off and comments** (Review tab, needs the cloud). Send a page for review; anyone the project is shared with, viewers included, can approve it or request changes, with a note. The same step makes a review link for reviewers without an account, or updates the page's existing links so they show the version sent. Every step is kept with who and when (**History**), and the tab says when a page was edited after it was approved. Comments go on the page or on a block: pick a block in the composer, choose *Comment on this block* in a block's ⋯ menu, or click a block in the preview while the Review tab is open. Blocks with open comments show a count in the outline; the Pages table shows each page's sign-off status and open comments. Comments and sign-off are stored apart from the project, so they never clash with someone editing the page.
 

@@ -275,6 +275,16 @@ select.input { padding-right: 24px; }
 .picker__item { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 10px; font: inherit; text-align: left; background: #fff; border: 1px solid var(--c-border); border-radius: 6px; cursor: pointer; color: var(--c-text); }
 .picker__item:hover { border-color: var(--c-brand); background: #fff8f8; }
 .picker__item--dim { opacity: .6; }
+.picker__note { grid-column: 1 / -1; margin: -4px 0 2px; }
+.picker__more { grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; margin-top: 12px; padding: 10px 12px; background: #f8f8f7; border-radius: 6px; }
+/* Components screen: libraries */
+.lib-sum { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; padding: 10px 0; border-top: 1px solid #eee; }
+.lib-sum > div { display: flex; flex-direction: column; gap: 2px; }
+.lib-item { display: flex; align-items: flex-start; gap: 8px; padding: 5px 0; }
+.lib-item input { flex: none; margin-top: 2px; }
+.lib-item > span { display: flex; flex-direction: column; }
+.lib-item__desc { line-height: 1.3; }
+.lib-item__changed { align-self: flex-start; margin-top: 2px; font-size: .7rem; font-weight: 700; padding: 0 6px; border-radius: 8px; background: #fff3d6; color: #7a4d00; }
 .picker__item .small { line-height: 1.3; }
 .inserter { min-height: 440px; }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 2px; }
