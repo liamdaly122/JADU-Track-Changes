@@ -3,9 +3,14 @@
 -- Safe to run again: it only creates what is missing and replaces the functions and policies.
 --
 -- What it sets up
---   projects          one row per project: site settings, pages and sections as one JSON document
+--   profiles          one row per account: display name, and whether the person has seen the tour
+--   app_settings      which email addresses may create an account (leeds.ac.uk unless you change it)
+--   projects          one row per project: its name, and the site settings and sections (meta)
+--   pages             one row per page, so a save sends only the page that changed
+--   page_history      an hourly copy of each page while it is being changed, last 48 kept
 --   project_members   who else can open a project, as viewer or editor (the owner is on the project row)
---   project_history   an hourly copy of each project, last 48 kept, so a bad save can be undone
+--   project_invites   colleagues invited before they had an account; they join when they sign up
+--   project_history   an hourly copy of a project's site settings and sections, last 48 kept
 --   cms-media         a private storage bucket for images, one folder per project
 --   page_comments     comments on a page or one of its blocks
 --   page_signoffs     every sign-off step for a page (in review, changes requested, approved) with who and when
@@ -46,6 +51,71 @@ create table if not exists public.project_history (
 );
 create index if not exists project_history_project_idx on public.project_history (project_id, saved_at desc);
 
+-- the site settings, sections and image list of a project. Pages used to live in projects.data with everything
+-- else; they now have their own table and data is kept, unchanged, only for CMS tabs opened before the update
+alter table public.projects add column if not exists meta jsonb;
+
+-- one row per page. data is the page without its original (source) and saved versions (revisions), which are
+-- large and change rarely, so a save sends only what changed. Deleting a page sets deleted_at, so it can be restored.
+create table if not exists public.pages (
+  project_id  uuid not null references public.projects (id) on delete cascade,
+  id          text not null check (char_length(id) between 1 and 100),
+  data        jsonb not null default '{}'::jsonb,
+  source      jsonb,
+  revisions   jsonb,
+  version     integer not null default 1,
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now(),
+  updated_by  uuid references auth.users (id) on delete set null,
+  deleted_at  timestamptz,
+  deleted_by  uuid references auth.users (id) on delete set null,
+  primary key (project_id, id)
+);
+create index if not exists pages_project_updated_idx on public.pages (project_id, updated_at desc);
+
+create table if not exists public.page_history (
+  id          bigserial primary key,
+  project_id  uuid not null references public.projects (id) on delete cascade,
+  page_id     text not null,
+  version     integer not null,
+  data        jsonb not null,
+  saved_at    timestamptz not null default now(),
+  saved_by    uuid references auth.users (id) on delete set null
+);
+create index if not exists page_history_page_idx on public.page_history (project_id, page_id, saved_at desc);
+
+-- accounts: a display name for each person (shown to colleagues working on the same project) and the tour
+create table if not exists public.profiles (
+  id            uuid primary key references auth.users (id) on delete cascade,
+  display_name  text check (display_name is null or char_length(display_name) between 1 and 80),
+  onboarded_at  timestamptz,
+  created_at    timestamptz not null default now()
+);
+
+-- who may create an account. Change it with, for example:
+--   update public.app_settings set allowed_email_domains = array['leeds.ac.uk', 'example.org'];
+-- An empty list lets anyone sign up.
+create table if not exists public.app_settings (
+  id                     integer primary key default 1 check (id = 1),
+  allowed_email_domains  text[] not null default array['leeds.ac.uk']
+);
+insert into public.app_settings (id) values (1) on conflict (id) do nothing;
+
+-- sharing with someone who has no account yet: they become a member when they sign up with that address
+create table if not exists public.project_invites (
+  project_id  uuid not null references public.projects (id) on delete cascade,
+  email       text not null check (email = lower(email)),
+  role        text not null check (role in ('viewer', 'editor')),
+  invited_by  uuid references auth.users (id) on delete set null,
+  created_at  timestamptz not null default now(),
+  primary key (project_id, email)
+);
+
+alter table public.pages           enable row level security;
+alter table public.page_history    enable row level security;
+alter table public.profiles        enable row level security;
+alter table public.app_settings    enable row level security;
+alter table public.project_invites enable row level security;
 alter table public.projects        enable row level security;
 alter table public.project_members enable row level security;
 alter table public.project_history enable row level security;
@@ -102,7 +172,9 @@ begin
 end $$;
 
 -- every save bumps the version (the app uses it to spot a colleague's newer save),
--- keeps the owner fixed, and copies the previous state into history at most once an hour
+-- keeps the owner fixed, and copies the previous state into history at most once an hour.
+-- The copy is of meta (site settings and sections); older copies made before pages had their own table hold the
+-- whole project document, pages included.
 create or replace function public.projects_before_update()
 returns trigger language plpgsql security definer set search_path = public as $$
 begin
@@ -112,11 +184,11 @@ begin
   new.version    := old.version + 1;
   new.updated_at := now();
   new.updated_by := auth.uid();
-  if new.data is distinct from old.data
+  if (new.meta is distinct from old.meta or new.data is distinct from old.data)
      and not exists (select 1 from public.project_history
                      where project_id = old.id and saved_at > now() - interval '1 hour') then
     insert into public.project_history (project_id, version, name, data, saved_by)
-      values (old.id, old.version, old.name, old.data, old.updated_by);
+      values (old.id, old.version, old.name, coalesce(old.meta, old.data), old.updated_by);
     delete from public.project_history
       where project_id = old.id
         and id not in (select id from public.project_history where project_id = old.id order by saved_at desc limit 48);
@@ -131,6 +203,52 @@ create trigger projects_before_insert before insert on public.projects
 drop trigger if exists projects_before_update on public.projects;
 create trigger projects_before_update before update on public.projects
   for each row execute function public.projects_before_update();
+
+-- pages: whoever saves is recorded, every save bumps the version, and the previous content is copied into
+-- page_history at most once an hour per page (last 48 kept)
+create or replace function public.pages_before_insert()
+returns trigger language plpgsql set search_path = public as $$
+begin
+  new.version    := 1;
+  new.created_at := now();
+  new.updated_at := now();
+  new.updated_by := auth.uid();
+  new.deleted_by := case when new.deleted_at is not null then auth.uid() end;
+  return new;
+end $$;
+
+create or replace function public.pages_before_update()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  new.project_id := old.project_id;
+  new.id         := old.id;
+  new.created_at := old.created_at;
+  new.version    := old.version + 1;
+  new.updated_at := now();
+  new.updated_by := auth.uid();
+  if new.deleted_at is null then new.deleted_by := null;
+  elsif old.deleted_at is null then new.deleted_at := now(); new.deleted_by := auth.uid();
+  else new.deleted_at := old.deleted_at; new.deleted_by := old.deleted_by;
+  end if;
+  if new.data is distinct from old.data
+     and not exists (select 1 from public.page_history
+                     where project_id = old.project_id and page_id = old.id and saved_at > now() - interval '1 hour') then
+    insert into public.page_history (project_id, page_id, version, data, saved_by)
+      values (old.project_id, old.id, old.version, old.data, old.updated_by);
+    delete from public.page_history
+      where project_id = old.project_id and page_id = old.id
+        and id not in (select id from public.page_history where project_id = old.project_id and page_id = old.id order by saved_at desc limit 48);
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists pages_before_insert on public.pages;
+create trigger pages_before_insert before insert on public.pages
+  for each row execute function public.pages_before_insert();
+
+drop trigger if exists pages_before_update on public.pages;
+create trigger pages_before_update before update on public.pages
+  for each row execute function public.pages_before_update();
 
 -- ---------------------------------------------------------------- policies
 
@@ -161,52 +279,140 @@ drop policy if exists "see history of my projects" on public.project_history;
 create policy "see history of my projects" on public.project_history
   for select to authenticated using (public.can_read_project(project_id));
 
-grant select, insert, update, delete on public.projects to authenticated;
+-- the app writes a project's name and meta. data is left as it was when pages moved to their own table, so a CMS
+-- tab opened before the update cannot save over the new layout (it shows a problem until it is reloaded)
+revoke insert, update on public.projects from authenticated;
+grant select, delete on public.projects to authenticated;
+grant insert (name, meta), update (name, meta) on public.projects to authenticated;
 grant select on public.project_members, public.project_history to authenticated;
 revoke all on public.projects, public.project_members, public.project_history from anon;
 
+-- pages: everyone on the project reads them; the owner and editors write them. Nobody deletes rows directly:
+-- deleting a page sets deleted_at, and only the owner can remove one for good (purge_page)
+drop policy if exists "read pages of my projects" on public.pages;
+create policy "read pages of my projects" on public.pages
+  for select to authenticated using (public.can_read_project(project_id));
+drop policy if exists "add pages as owner or editor" on public.pages;
+create policy "add pages as owner or editor" on public.pages
+  for insert to authenticated with check (public.can_edit_project(project_id));
+drop policy if exists "edit pages as owner or editor" on public.pages;
+create policy "edit pages as owner or editor" on public.pages
+  for update to authenticated using (public.can_edit_project(project_id)) with check (public.can_edit_project(project_id));
+revoke all on public.pages from anon, authenticated;
+grant select on public.pages to authenticated;
+grant insert (project_id, id, data, source, revisions, deleted_at), update (data, source, revisions, deleted_at) on public.pages to authenticated;
+
+drop policy if exists "see history of my pages" on public.page_history;
+create policy "see history of my pages" on public.page_history
+  for select to authenticated using (public.can_read_project(project_id));
+revoke all on public.page_history from anon, authenticated;
+grant select on public.page_history to authenticated;
+
+-- profiles, settings and invites are read and changed only through the functions below
+revoke all on public.profiles, public.app_settings, public.project_invites from anon, authenticated;
+
 -- ---------------------------------------------------------------- functions the app calls
 
--- projects I own or that are shared with me, without the (large) data column
-create or replace function public.my_projects()
-returns table (id uuid, name text, role text, owner_email text, version integer, updated_at timestamptz, updated_by_email text)
+-- a person's name as colleagues see it: the display name, or the part of the email before the @
+create or replace function public.person_name(p_user uuid)
+returns text language sql stable security definer set search_path = public, auth as $$
+  select coalesce((select display_name from public.profiles where id = p_user),
+                  (select split_part(email::text, '@', 1) from auth.users where id = p_user));
+$$;
+
+-- projects I own or that are shared with me, without their content
+drop function if exists public.my_projects();
+create function public.my_projects()
+returns table (id uuid, name text, role text, owner_email text, owner_name text, version integer, updated_at timestamptz,
+               updated_by_email text, updated_by_name text, page_count integer, member_count integer)
 language sql stable security definer set search_path = public, auth as $$
   select p.id, p.name,
          case when p.owner = auth.uid() then 'owner' else m.role end,
-         ou.email::text, p.version, p.updated_at, uu.email::text
+         ou.email::text, public.person_name(p.owner), p.version,
+         greatest(p.updated_at, coalesce((select max(g.updated_at) from public.pages g where g.project_id = p.id), p.updated_at)),
+         uu.email::text,
+         public.person_name(coalesce((select g.updated_by from public.pages g where g.project_id = p.id order by g.updated_at desc limit 1), p.updated_by)),
+         (select count(*)::integer from public.pages g where g.project_id = p.id and g.deleted_at is null),
+         1 + (select count(*)::integer from public.project_members x where x.project_id = p.id)
   from public.projects p
   left join public.project_members m on m.project_id = p.id and m.user_id = auth.uid()
   join auth.users ou on ou.id = p.owner
   left join auth.users uu on uu.id = p.updated_by
   where p.owner = auth.uid() or m.user_id is not null
-  order by p.updated_at desc;
+  order by 7 desc;
 $$;
 
-create or replace function public.project_member_list(p_project uuid)
-returns table (user_id uuid, email text, role text)
+-- everyone on a project, with invitations still waiting for an account at the end
+drop function if exists public.project_member_list(uuid);
+create function public.project_member_list(p_project uuid)
+returns table (user_id uuid, email text, name text, role text, pending boolean)
 language sql stable security definer set search_path = public, auth as $$
-  select p.owner, u.email::text, 'owner'::text
+  select p.owner, u.email::text, public.person_name(p.owner), 'owner'::text, false
     from public.projects p join auth.users u on u.id = p.owner
    where p.id = p_project and public.can_read_project(p_project)
   union all
-  select m.user_id, u.email::text, m.role
+  select m.user_id, u.email::text, public.person_name(m.user_id), m.role, false
     from public.project_members m join auth.users u on u.id = m.user_id
-   where m.project_id = p_project and public.can_read_project(p_project);
+   where m.project_id = p_project and public.can_read_project(p_project)
+  union all
+  select null::uuid, i.email, null::text, i.role, true
+    from public.project_invites i
+   where i.project_id = p_project and public.can_read_project(p_project);
 $$;
 
-create or replace function public.share_project(p_project uuid, p_email text, p_role text)
-returns void language plpgsql security definer set search_path = public, auth as $$
-declare uid uuid;
+-- is this address one that may have an account?
+create or replace function public.email_allowed(p_email text)
+returns boolean language sql stable security definer set search_path = public as $$
+  select coalesce(cardinality(s.allowed_email_domains), 0) = 0
+      or exists (select 1 from unnest(s.allowed_email_domains) d
+                  where lower(split_part(trim(p_email), '@', 2)) = lower(d)
+                     or lower(split_part(trim(p_email), '@', 2)) like '%.' || lower(d))
+    from public.app_settings s where s.id = 1;
+$$;
+
+-- share with a colleague: they join straight away if they have an account, or when they sign up if not.
+-- Returns 'shared' or 'invited'.
+drop function if exists public.share_project(uuid, text, text);
+create function public.share_project(p_project uuid, p_email text, p_role text)
+returns text language plpgsql security definer set search_path = public, auth as $$
+declare uid uuid; addr text := lower(trim(p_email)); proj text; who text; site text;
 begin
   if p_role not in ('viewer', 'editor') then raise exception 'Role must be viewer or editor'; end if;
   if not public.is_project_owner(p_project) then raise exception 'Only the owner can share this project'; end if;
-  select u.id into uid from auth.users u where lower(u.email) = lower(trim(p_email));
-  if uid is null then
-    raise exception 'No account for %. The admin needs to add them in Supabase (Authentication, Users) first.', p_email;
-  end if;
+  if addr !~ '^[^@\s]+@[^@\s]+\.[^@\s]+$' then raise exception 'That does not look like an email address'; end if;
+  select u.id into uid from auth.users u where lower(u.email) = addr;
   if uid = auth.uid() then raise exception 'You already own this project'; end if;
-  insert into public.project_members (project_id, user_id, role) values (p_project, uid, p_role)
-    on conflict (project_id, user_id) do update set role = excluded.role;
+  if uid is not null then
+    insert into public.project_members (project_id, user_id, role) values (p_project, uid, p_role)
+      on conflict (project_id, user_id) do update set role = excluded.role;
+    delete from public.project_invites where project_id = p_project and email = addr;
+    return 'shared';
+  end if;
+  if not public.email_allowed(addr) then
+    raise exception 'Accounts are limited to % addresses, so % cannot sign up',
+      (select array_to_string(allowed_email_domains, ', ') from public.app_settings where id = 1), p_email;
+  end if;
+  insert into public.project_invites (project_id, email, role, invited_by) values (p_project, addr, p_role, auth.uid())
+    on conflict (project_id, email) do update set role = excluded.role;
+  -- an email with the sign-up link, when notifications are set up (DEPLOY.md, part 7)
+  begin
+    select name into proj from public.projects where id = p_project;
+    who := public.person_name(auth.uid());
+    select site_url into site from public.notify_settings where id = 1;
+    perform public.notify_send(addr, coalesce(who, 'A colleague') || ' invited you to "' || proj || '"',
+      coalesce(who, 'A colleague') || ' invited you to work on "' || proj || '" in the Leeds prototyping CMS.' ||
+      case when site is not null and site <> '' then E'\n\nCreate your account with this address at ' || rtrim(site, '/') || E'/ and the project will be waiting for you.'
+           else E'\n\nCreate your account with this address and the project will be waiting for you.' end);
+  exception when others then null;
+  end;
+  return 'invited';
+end $$;
+
+create or replace function public.cancel_invite(p_project uuid, p_email text)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  if not public.is_project_owner(p_project) then raise exception 'Only the owner can change who is invited'; end if;
+  delete from public.project_invites where project_id = p_project and email = lower(trim(p_email));
 end $$;
 
 create or replace function public.unshare_project(p_project uuid, p_user uuid)
@@ -218,20 +424,155 @@ begin
   delete from public.project_members where project_id = p_project and user_id = p_user;
 end $$;
 
--- the hourly copies of a project, newest first, without their data
-create or replace function public.project_history_list(p_project uuid)
-returns table (id bigint, version integer, saved_at timestamptz, saved_by_email text)
+-- the hourly copies of a project's settings, newest first, without their data
+drop function if exists public.project_history_list(uuid);
+create function public.project_history_list(p_project uuid)
+returns table (id bigint, version integer, saved_at timestamptz, saved_by_email text, saved_by_name text, whole_project boolean)
 language sql stable security definer set search_path = public, auth as $$
-  select h.id, h.version, h.saved_at, u.email::text
+  select h.id, h.version, h.saved_at, u.email::text, public.person_name(h.saved_by), h.data ? 'pages'
     from public.project_history h left join auth.users u on u.id = h.saved_by
    where h.project_id = p_project and public.can_read_project(p_project)
    order by h.saved_at desc;
 $$;
 
+-- the hourly copies of one page, newest first, without their data
+create or replace function public.page_history_list(p_project uuid, p_page text)
+returns table (id bigint, version integer, saved_at timestamptz, saved_by_name text, title text)
+language sql stable security definer set search_path = public, auth as $$
+  select h.id, h.version, h.saved_at, public.person_name(h.saved_by), h.data ->> 'title'
+    from public.page_history h
+   where h.project_id = p_project and h.page_id = p_page and public.can_read_project(p_project)
+   order by h.saved_at desc;
+$$;
+
+-- deleted pages, newest first, for the "recently deleted" list
+create or replace function public.deleted_pages(p_project uuid)
+returns table (id text, title text, slug text, deleted_at timestamptz, deleted_by_name text)
+language sql stable security definer set search_path = public, auth as $$
+  select g.id, g.data ->> 'title', g.data ->> 'slug', g.deleted_at, public.person_name(g.deleted_by)
+    from public.pages g
+   where g.project_id = p_project and g.deleted_at is not null and public.can_read_project(p_project)
+   order by g.deleted_at desc;
+$$;
+
+-- remove a deleted page for good (owner only); its comments, sign-off and Jadu ticks go too
+create or replace function public.purge_page(p_project uuid, p_page text)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  if not public.is_project_owner(p_project) then raise exception 'Only the owner can remove a page for good'; end if;
+  if not exists (select 1 from public.pages where project_id = p_project and id = p_page and deleted_at is not null) then
+    raise exception 'Only a deleted page can be removed for good';
+  end if;
+  delete from public.page_history where project_id = p_project and page_id = p_page;
+  delete from public.page_comments where project_id = p_project and page_id = p_page;
+  delete from public.page_signoffs where project_id = p_project and page_id = p_page;
+  delete from public.jadu_checks where project_id = p_project and page_id = p_page;
+  delete from public.pages where project_id = p_project and id = p_page;
+end $$;
+
+-- ---------------------------------------------------------------- accounts
+
+create or replace function public.my_profile()
+returns table (id uuid, email text, display_name text, onboarded_at timestamptz, created_at timestamptz)
+language sql stable security definer set search_path = public, auth as $$
+  select u.id, u.email::text, coalesce(p.display_name, split_part(u.email::text, '@', 1)), p.onboarded_at, coalesce(p.created_at, u.created_at)
+    from auth.users u left join public.profiles p on p.id = u.id
+   where u.id = auth.uid();
+$$;
+
+create or replace function public.set_display_name(p_name text)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  if p_name is null or char_length(trim(p_name)) not between 1 and 80 then raise exception 'Use a name of 1 to 80 characters'; end if;
+  insert into public.profiles (id, display_name) values (auth.uid(), trim(p_name))
+    on conflict (id) do update set display_name = excluded.display_name;
+end $$;
+
+-- the tour: shown once after sign-up, then only when someone asks for it
+create or replace function public.set_onboarded(p_done boolean)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  insert into public.profiles (id, onboarded_at) values (auth.uid(), case when p_done then now() end)
+    on conflict (id) do update set onboarded_at = case when p_done then coalesce(public.profiles.onboarded_at, now()) end;
+end $$;
+
+-- which addresses may sign up, for the sign-up form (it can be read before signing in)
+create or replace function public.signup_domains()
+returns text[] language sql stable security definer set search_path = public as $$
+  select allowed_email_domains from public.app_settings where id = 1;
+$$;
+
+-- new accounts: only from allowed addresses; each gets a profile and joins the projects it was invited to
+create or replace function public.check_new_account()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if new.email is not null and not public.email_allowed(new.email) then
+    raise exception 'Sign-up is limited to % addresses', (select array_to_string(allowed_email_domains, ', ') from public.app_settings where id = 1);
+  end if;
+  return new;
+end $$;
+
+create or replace function public.welcome_new_account()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  insert into public.profiles (id, display_name)
+    values (new.id, nullif(left(trim(coalesce(new.raw_user_meta_data ->> 'name', '')), 80), ''))
+    on conflict (id) do nothing;
+  insert into public.project_members (project_id, user_id, role)
+    select i.project_id, new.id, i.role from public.project_invites i where i.email = lower(new.email)
+    on conflict (project_id, user_id) do nothing;
+  delete from public.project_invites where email = lower(new.email);
+  return new;
+exception when others then
+  raise warning 'Could not finish setting up the account %: %', new.email, sqlerrm;
+  return new;
+end $$;
+
+drop trigger if exists check_new_account on auth.users;
+create trigger check_new_account before insert on auth.users for each row execute function public.check_new_account();
+drop trigger if exists welcome_new_account on auth.users;
+create trigger welcome_new_account after insert on auth.users for each row execute function public.welcome_new_account();
+
+-- accounts made before profiles existed
+insert into public.profiles (id) select id from auth.users on conflict (id) do nothing;
+
 revoke execute on function public.my_projects(), public.project_member_list(uuid), public.share_project(uuid, text, text),
-  public.unshare_project(uuid, uuid), public.project_history_list(uuid) from public, anon;
+  public.unshare_project(uuid, uuid), public.project_history_list(uuid), public.cancel_invite(uuid, text),
+  public.page_history_list(uuid, text), public.deleted_pages(uuid), public.purge_page(uuid, text),
+  public.my_profile(), public.set_display_name(text), public.set_onboarded(boolean), public.person_name(uuid),
+  public.email_allowed(text), public.check_new_account(), public.welcome_new_account() from public, anon;
 grant execute on function public.my_projects(), public.project_member_list(uuid), public.share_project(uuid, text, text),
-  public.unshare_project(uuid, uuid), public.project_history_list(uuid) to authenticated;
+  public.unshare_project(uuid, uuid), public.project_history_list(uuid), public.cancel_invite(uuid, text),
+  public.page_history_list(uuid, text), public.deleted_pages(uuid), public.purge_page(uuid, text),
+  public.my_profile(), public.set_display_name(text), public.set_onboarded(boolean) to authenticated;
+grant execute on function public.signup_domains() to anon, authenticated;
+
+-- ---------------------------------------------------------------- moving pages into their own table (runs once per project)
+-- Projects saved before this update hold their pages inside data. Each page becomes a row in pages (its original and
+-- saved versions in their own columns), and meta gets the site settings, sections and image list. data itself is
+-- left as it was. Running this file again changes nothing for projects that have meta already.
+do $$
+declare n integer;
+begin
+  alter table public.pages disable trigger pages_before_insert;
+  alter table public.projects disable trigger user;
+  insert into public.pages (project_id, id, data, source, revisions, version, created_at, updated_at, updated_by)
+    select p.id, e ->> 'id', e - 'source' - 'revisions', e -> 'source', e -> 'revisions', 1, p.created_at, p.updated_at, p.updated_by
+      from public.projects p, jsonb_array_elements(case when jsonb_typeof(p.data -> 'pages') = 'array' then p.data -> 'pages' else '[]'::jsonb end) e
+     where p.meta is null and coalesce(e ->> 'id', '') <> ''
+    on conflict (project_id, id) do nothing;
+  get diagnostics n = row_count;
+  update public.projects
+     set meta = jsonb_build_object('site', coalesce(data -> 'site', '{}'::jsonb), 'sections', coalesce(data -> 'sections', '[]'::jsonb), 'media', coalesce(data -> 'media', '[]'::jsonb))
+   where meta is null;
+  alter table public.projects enable trigger user;
+  alter table public.pages enable trigger pages_before_insert;
+  if n > 0 then raise notice 'Moved % pages into their own table', n; end if;
+exception when others then
+  alter table public.projects enable trigger user;
+  alter table public.pages enable trigger pages_before_insert;
+  raise;
+end $$;
 
 -- ---------------------------------------------------------------- image storage
 
@@ -683,6 +1024,7 @@ returns trigger language plpgsql security definer set search_path = public as $$
 declare pid uuid; pg text;
 begin
   if tg_table_name = 'projects' then pid := new.id;
+  elsif tg_table_name = 'pages' then pid := new.project_id; pg := new.id;
   elsif tg_op = 'DELETE' then pid := old.project_id; pg := old.page_id;
   else pid := new.project_id; pg := new.page_id;
   end if;
@@ -695,6 +1037,8 @@ end $$;
 
 drop trigger if exists ping_on_project on public.projects;
 create trigger ping_on_project after update on public.projects for each row execute function public.ping_project('project');
+drop trigger if exists ping_on_page on public.pages;
+create trigger ping_on_page after insert or update on public.pages for each row execute function public.ping_project('page');
 drop trigger if exists ping_on_comment on public.page_comments;
 create trigger ping_on_comment after insert or update or delete on public.page_comments for each row execute function public.ping_project('comments');
 drop trigger if exists ping_on_signoff on public.page_signoffs;
@@ -798,14 +1142,13 @@ $$;
 
 create or replace function public.notify_page_title(p_project uuid, p_page text)
 returns text language sql stable security definer set search_path = public as $$
-  select coalesce((select e ->> 'title' from public.projects p, jsonb_array_elements(coalesce(p.data -> 'pages', '[]'::jsonb)) e
-                    where p.id = p_project and e ->> 'id' = p_page limit 1), 'a page');
+  select coalesce((select g.data ->> 'title' from public.pages g where g.project_id = p_project and g.id = p_page), 'a page');
 $$;
 
 create or replace function public.notify_footer(p_project uuid, p_page text)
 returns text language sql stable security definer set search_path = public as $$
-  select case when s.site_url is not null and s.site_url <> '' then E'\n\nOpen the page: ' || rtrim(s.site_url, '/') || '/#edit/' || p_page else '' end ||
-         E'\n\nYou get these emails because you work on this project. Change what you get on the Cloud screen of the CMS.'
+  select case when s.site_url is not null and s.site_url <> '' then E'\n\nOpen the page: ' || rtrim(s.site_url, '/') || '/#open/' || p_project || '/' || p_page else '' end ||
+         E'\n\nYou get these emails because you work on this project. Change what you get on the Sharing screen of the CMS.'
     from public.notify_settings s where s.id = 1;
 $$;
 
@@ -855,4 +1198,5 @@ create trigger notify_signoff after insert on public.page_signoffs for each row 
 drop trigger if exists notify_comment on public.page_comments;
 create trigger notify_comment after insert on public.page_comments for each row execute function public.notify_on_comment();
 
--- Done. Next: Authentication > Users > Add user, for yourself and each colleague (tick "Auto Confirm User").
+-- Done. Next, in Supabase: Authentication > Sign In / Providers: allow new users to sign up; and Authentication >
+-- URL Configuration: set the Site URL to the CMS address. DEPLOY.md, part 3, has the details.
