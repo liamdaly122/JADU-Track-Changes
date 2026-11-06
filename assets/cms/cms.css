@@ -426,6 +426,19 @@ a.starter { text-decoration: none; }
 .signoff__pill--sm { font-size: .68rem; padding: 1px 7px; margin-left: 4px; }
 .signoff__note { margin: 4px 0 8px; padding: 4px 10px; border-left: 3px solid var(--c-border); color: #444; white-space: pre-wrap; }
 .signoff__actions { margin: 8px 0 4px; }
+.plinks { margin: 10px 0 4px; padding-top: 8px; border-top: 1px solid #f0efee; }
+.plinks__head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; margin-bottom: 4px; font-size: .85rem; }
+.plink { padding: 6px 0; border-top: 1px solid #f0efee; }
+.plinks__head + .plink { border-top: 0; }
+.plink__text { display: flex; flex-direction: column; font-size: .85rem; overflow-wrap: anywhere; }
+.plink__old { margin-top: 2px; color: #7a4d00; }
+.plink__acts { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 4px; }
+.plinks > .row { margin-top: 6px; }
+.sendlinks { margin: 10px 0; padding: 8px 10px; background: #f8f8f7; border-radius: 6px; }
+.sendlinks .field__label { margin: 0 0 4px; }
+.sendlinks .check { display: flex; align-items: flex-start; margin: 4px 0; }
+.sendlinks .check input { flex: none; margin-top: 2px; }
+.sendlinks__opts { margin-left: 24px; }
 .count-pill { margin-left: auto; font-size: .72rem; font-weight: 700; padding: 1px 8px; border-radius: 10px; }
 .count-pill--error { background: #fde8ea; color: #9b0018; }
 .count-pill--warn { background: #fff1d6; color: #6b4600; }

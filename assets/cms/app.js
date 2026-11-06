@@ -1592,9 +1592,12 @@
     if (!page || !cloudReady()) return Promise.resolve(null);
     var r = App.review && App.review.pageId === page.id ? App.review : (App.review = { pageId: page.id, comments: [], history: [], loaded: false });
     if (r.loading && !force) return r.loading;
-    r.loading = Promise.all([C.review.comments(page.id), C.review.signoffHistory(page.id)]).then(function (res) {
+    // owners and editors also get the review links that include this page; null means they could not be listed
+    var links = C.canEdit() ? C.shares.list().catch(function () { return null; }) : null;
+    r.loading = Promise.all([C.review.comments(page.id), C.review.signoffHistory(page.id), links]).then(function (res) {
       r.loading = null;
       r.comments = res[0] || []; r.history = res[1] || []; r.loaded = true; r.error = ''; r.at = Date.now();
+      r.links = res[2] ? linksForPage(res[2], page) : null;
       var s = r.history[0];
       App.reviewSummary = App.reviewSummary || {};
       App.reviewSummary[page.id] = { page_id: page.id, status: s ? s.status : null, by_email: s && s.by_email, at: s && s.at, content_hash: s && s.content_hash, open_comments: r.comments.filter(function (c) { return !c.resolved_at; }).length };
@@ -1668,8 +1671,8 @@
     var acts = [];
     if (status === 'in_review') { acts.push(signoffBtn('approved', 'Approve', true)); acts.push(signoffBtn('changes_requested', 'Request changes')); }
     else acts.push(signoffBtn('in_review', status === 'not_started' ? 'Send for review' : 'Send for review again', status !== 'approved' || edited));
-    if (window.UOL_CLOUD.canEdit()) acts.push(el('button', { class: 'btn btn--sm', type: 'button', title: 'A read-only link for reviewers without an account', onclick: function () { shareLinkDialog('page'); } }, [icon('share', 16), ' Review link']));
     box.appendChild(el('div', { class: 'row signoff__actions' }, acts));
+    if (window.UOL_CLOUD.canEdit()) box.appendChild(pageLinksBlock(page, r));
     if (r.history.length) {
       var det = el('details', { class: 'linklist' }, [el('summary', { text: 'History (' + r.history.length + ')' })]);
       r.history.forEach(function (h) {
@@ -1686,15 +1689,17 @@
     var page = App.page, C = window.UOL_CLOUD;
     var titles = { in_review: 'Send for review', approved: 'Approve this page', changes_requested: 'Request changes' };
     var intro = {
-      in_review: 'Everyone the project is shared with can then approve "' + page.title + '" or ask for changes. For a reviewer without an account, also share a review link.',
+      in_review: 'Marks "' + page.title + '" as in review. Everyone the project is shared with can then approve it or ask for changes.',
       approved: 'Records that you approved "' + page.title + '" as it is now, with your name and the time. If the page is edited afterwards, the Review tab says so.',
       changes_requested: 'Sends "' + page.title + '" back with your note. Comments on particular blocks help too.'
     }[status];
     var note = el('textarea', { class: 'input', rows: 3, placeholder: status === 'changes_requested' ? 'What needs to change?' : 'Optional note' });
     var errors = status === 'approved' ? runCheck(page).errors : 0;
     var count = status === 'approved' ? openCommentsFor() : 0;
+    var links = status === 'in_review' && C.canEdit() ? sendLinkOptions(page) : null;
     UI.modal({ title: titles[status], body: el('div', {}, [
       el('p', { class: 'small', text: intro }),
+      links ? links.el : null,
       errors ? el('p', { class: 'notice notice--warn small', text: 'Check page found ' + errors + ' problem' + (errors === 1 ? '' : 's') + ' to fix. You can still approve.' }) : null,
       count ? el('p', { class: 'notice notice--warn small', text: count + ' comment' + (count === 1 ? ' is' : 's are') + ' still open.' }) : null,
       el('label', { class: 'field' }, [el('span', { class: 'field__label', text: status === 'changes_requested' ? 'What needs to change' : 'Note (optional)' }), note])
@@ -1704,6 +1709,12 @@
       C.review.setSignoff(page.id, status, note.value, RV.contentHash(page)).then(function () {
         toast({ in_review: 'Sent for review', approved: 'Approved', changes_requested: 'Changes requested' }[status], 'success');
         loadReview(true);
+        if (!links) return;
+        return links.run().then(function (res) {
+          loadReview(true);
+          if (res.made) linkReadyDialog(res.made.url, res.made.name);
+          else if (res.updated) toast('Sent for review. ' + (res.updated === 1 ? 'The review link now shows' : res.updated + ' review links now show') + ' this version', 'success');
+        }, function (e) { toast('Sent for review, but the review link failed: ' + e.message, 'error', 8000); loadReview(true); });
       }, cloudError);
     } }] });
   }
@@ -1816,9 +1827,9 @@
       madeAt: new Date().toISOString(), madeBy: user ? user.email : ''
     };
   }
-  function reviewUrl(token, scope) {
+  function reviewUrl(token, scope, page) {
     var base = location.href.replace(/[#?].*$/, '').replace(/[^/]*$/, '');
-    var s = parseScope(scope), p = s.kind === 'page' ? Store.getPage(s.id) : null;
+    var s = parseScope(scope), p = page || (s.kind === 'page' ? Store.getPage(s.id) : null);
     return base + 'review.html#' + token + (p ? '/' + p.slug : '');
   }
   function scopeText(r) {
@@ -1828,6 +1839,110 @@
     return 'Whole project (' + r.page_count + ' page' + (r.page_count === 1 ? '' : 's') + ')';
   }
   function imageProgress(i, n) { toast('Copying images for reviewers: ' + i + ' of ' + n, 'info', 1500); }
+  /* the review links whose copy includes a page, the page's own links first. Lists from before page_hashes existed
+     fall back to each link's scope */
+  function linksForPage(rows, page) {
+    var sec = Store.sectionOf(page.id), order = { page: 0, section: 1, project: 2 };
+    return (rows || []).filter(function (r) {
+      if (r.page_hashes) return Object.prototype.hasOwnProperty.call(r.page_hashes, page.id);
+      var s = parseScope(r.scope);
+      return s.kind === 'project' || (s.kind === 'page' && s.id === page.id) || (s.kind === 'section' && !!sec && s.id === sec.id);
+    }).sort(function (a, b) { return order[parseScope(a.scope).kind] - order[parseScope(b.scope).kind]; });
+  }
+  /* 'current' or 'older' for the page's version in a link's copy; '' when the copy has no fingerprint (made before they were kept) */
+  function linkVersion(r, page) {
+    var h = r.page_hashes && r.page_hashes[page.id];
+    return !h ? '' : h === RV.contentHash(page) ? 'current' : 'older';
+  }
+  function linkFeatures(r) {
+    return (r.allow_comments === false ? 'Comments off' : (r.guest_comments || 0) + ' comment' + (r.guest_comments === 1 ? '' : 's'))
+      + ' · ' + (r.allow_approvals ? (r.guest_signoffs || 0) + ' sign-off' + (r.guest_signoffs === 1 ? '' : 's') + ' from reviewers' : 'approvals off');
+  }
+  function updateLink(r) {
+    var data; try { data = shareData(r.scope); } catch (e) { return Promise.reject(e); }
+    if (App.dirty) saveNow();
+    return window.UOL_CLOUD.shares.update(r.token, data, imageProgress);
+  }
+  /* Copy link, Open, Update and the more menu, on the Cloud screen and the Review tab. With a page, the link opens on it */
+  function linkActions(r, reload, page) {
+    var C = window.UOL_CLOUD, url = reviewUrl(r.token, r.scope, page);
+    return [
+      el('button', { class: 'btn btn--xs', type: 'button', onclick: function () { X.copyText(url).then(function () { toast('Link copied', 'success'); }); } }, ['Copy link']),
+      el('a', { class: 'btn btn--xs', href: url, target: '_blank', rel: 'noopener' }, ['Open']),
+      el('button', { class: 'btn btn--xs', type: 'button', title: 'Replace the copy with the pages as they are now; the link stays the same', onclick: function () {
+        updateLink(r).then(function () { toast('"' + r.name + '" now shows the latest version', 'success'); reload(); }, cloudError);
+      } }, ['Update']),
+      menuButton(null, [
+        { label: r.allow_comments === false ? 'Let reviewers comment' : 'Turn off comments (existing ones stay)', onClick: function () { C.shares.setComments(r.token, r.allow_comments === false).then(function () { toast(r.allow_comments === false ? 'Reviewers can comment' : 'Comments turned off for this link', 'success'); reload(); }, cloudError); } },
+        { label: r.allow_approvals ? 'Turn off approvals (past sign-offs stay)' : 'Let reviewers approve or ask for changes', onClick: function () { C.shares.setApprovals(r.token, !r.allow_approvals).then(function () { toast(r.allow_approvals ? 'Approvals turned off for this link' : 'Reviewers can now approve or ask for changes', 'success'); reload(); }, cloudError); } },
+        '-',
+        { label: 'Delete link', onClick: function () { UI.confirm('Delete review link', 'Delete "' + r.name + '"? The link stops working for everyone who has it. Comments and sign-offs made through it are kept.', 'Delete', true).then(function (ok) { if (ok) C.shares.remove(r.token).then(function () { toast('Review link deleted', 'info'); reload(); }, cloudError); }); } }
+      ], { icon: 'more', title: 'More for this link' })
+    ];
+  }
+  /* on the Review tab: the links reviewers without an account use for this page */
+  function pageLinksBlock(page, r) {
+    var wrap = el('div', { class: 'plinks' }, [el('div', { class: 'plinks__head' }, [el('strong', { text: 'Review links' }), el('span', { class: 'small muted', text: 'for reviewers without an account' })])]);
+    if (!r.links) { wrap.appendChild(el('p', { class: 'small muted', text: 'Could not load the review links. They are listed on the Cloud screen.' })); return wrap; }
+    if (!r.links.length) wrap.appendChild(el('p', { class: 'small muted', text: 'None for this page yet. Send for review makes one, or make one now.' }));
+    r.links.forEach(function (l) {
+      var v = linkVersion(l, page);
+      wrap.appendChild(el('div', { class: 'plink' }, [
+        el('div', { class: 'plink__text' }, [
+          el('strong', { text: l.name }),
+          el('span', { class: 'small muted', text: (parseScope(l.scope).kind === 'page' ? 'This page' : scopeText(l)) + ' · copy from ' + fmtTime(l.updated_at) }),
+          el('span', { class: 'small muted', text: linkFeatures(l) }),
+          v === 'older' ? el('span', { class: 'plink__old small', text: 'Shows an older version of this page. Update it so reviewers see your latest edits.' }) : null
+        ]),
+        el('div', { class: 'plink__acts' }, linkActions(l, function () { loadReview(true); }, page))
+      ]));
+    });
+    wrap.appendChild(el('div', { class: 'row' }, [el('button', { class: 'btn btn--xs', type: 'button', onclick: function () { shareLinkDialog('page'); } }, [icon('share', 14), ' New review link'])]));
+    return wrap;
+  }
+  /* the review link part of Send for review: update the page's links, or make one if none includes the page */
+  function sendLinkOptions(page) {
+    var r = pageReview(), links = r && r.links;
+    if (!links) return null;
+    var box = el('div', { class: 'sendlinks' }, [el('p', { class: 'field__label', text: 'Reviewers without an account' })]);
+    var updates = [], make = null, comments = null, approve = null;
+    links.forEach(function (l) {
+      var v = linkVersion(l, page), s = parseScope(l.scope);
+      if (v === 'current') { box.appendChild(el('p', { class: 'small muted', text: 'The review link "' + l.name + '" already shows this version.' })); return; }
+      var cb = el('input', { type: 'checkbox', checked: s.kind === 'page' });
+      updates.push({ link: l, box: cb });
+      box.appendChild(el('label', { class: 'check small' }, [cb, el('span', { text: s.kind === 'page' ? 'Update the review link "' + l.name + '" so it shows this version'
+        : 'Update the review link "' + l.name + '" (' + scopeText(l).replace(/^(\w)/, function (c) { return c.toLowerCase(); }) + ') so it shows this version. This also updates the other pages in it' })]));
+    });
+    if (!links.length) {
+      make = el('input', { type: 'checkbox', checked: true });
+      comments = el('input', { type: 'checkbox', checked: true });
+      approve = el('input', { type: 'checkbox', checked: true });
+      var opts = el('div', { class: 'sendlinks__opts' }, [
+        el('label', { class: 'check small' }, [comments, el('span', { text: 'Reviewers can comment, with their name' })]),
+        el('label', { class: 'check small' }, [approve, el('span', { text: 'Reviewers can approve or ask for changes, with their name and role' })])
+      ]);
+      make.addEventListener('change', function () { opts.hidden = !make.checked; });
+      box.appendChild(el('label', { class: 'check small' }, [make, el('span', { text: 'Also make a review link: a read-only copy of this page anyone with the link can open' })]));
+      box.appendChild(opts);
+    }
+    return {
+      el: box,
+      run: function () {
+        var C = window.UOL_CLOUD, chosen = updates.filter(function (u) { return u.box.checked; }), made = null;
+        var jobs = chosen.map(function (u) { return updateLink(u.link); });
+        if (make && make.checked) {
+          var sc = 'page:' + page.id, data;
+          try { data = shareData(sc); } catch (e) { return Promise.reject(e); }
+          jobs.push(C.shares.create(page.title, sc, data, imageProgress).then(function (token) {
+            return Promise.all([comments.checked ? null : C.shares.setComments(token, false), approve.checked ? C.shares.setApprovals(token, true) : null])
+              .then(function () { made = { url: reviewUrl(token, sc), name: page.title }; });
+          }));
+        }
+        return Promise.all(jobs).then(function () { return { made: made, updated: chosen.length }; });
+      }
+    };
+  }
   function shareLinkDialog(defaultKind) {
     var C = window.UOL_CLOUD, l = C && C.link(), page = App.view === 'edit' ? App.page : null;
     if (!cloudReady()) { toast('Review links need the cloud: upload this project and sign in on the Cloud screen first', 'warn', 6000); return; }
@@ -1846,7 +1961,7 @@
     var msg = el('p', { class: 'small', role: 'alert' });
     var allow = el('input', { type: 'checkbox', checked: true }), approve = el('input', { type: 'checkbox' });
     UI.modal({ title: 'Share a review link', body: el('div', {}, [
-      el('p', { class: 'small', text: 'Anyone with the link can view a copy of the pages as they are now, without an account. Later edits only show once you update the link on the Cloud screen. Reviewers cannot edit, and see nothing else in the project.' }),
+      el('p', { class: 'small', text: 'Anyone with the link can view a copy of the pages as they are now, without an account. Later edits only show once you update the link, on the Review tab or the Cloud screen. Reviewers cannot edit, and see nothing else in the project.' }),
       el('label', { class: 'field' }, [el('span', { class: 'field__label', text: 'What to share' }), scope]),
       el('label', { class: 'field' }, [el('span', { class: 'field__label', text: 'Name shown to reviewers' }), name]),
       el('label', { class: 'check small' }, [allow, el('span', { text: 'Let reviewers comment, with their name. Their comments appear on the Review tab.' })]),
@@ -1859,7 +1974,7 @@
       var sc = scope.value;
       C.shares.create(name.value.trim() || defName(), sc, data, imageProgress).then(function (token) {
         return Promise.all([allow.checked ? null : C.shares.setComments(token, false), approve.checked ? C.shares.setApprovals(token, true) : null])
-          .then(function () { api.close(); linkReadyDialog(reviewUrl(token, sc), name.value.trim() || defName()); });
+          .then(function () { api.close(); if (App.view === 'edit') loadReview(true); linkReadyDialog(reviewUrl(token, sc), name.value.trim() || defName()); });
       }).catch(function (e) { msg.className = 'small error'; msg.textContent = e.message; });
       return false;
     } }] });
@@ -1867,7 +1982,7 @@
   function linkReadyDialog(url, name) {
     var input = el('input', { class: 'input input--mono', type: 'text', readonly: true, value: url, 'aria-label': 'Review link' });
     UI.modal({ title: 'Review link ready', body: el('div', {}, [
-      el('p', { class: 'small', text: 'Send this link to reviewers. It shows "' + name + '" as it is now. Manage or remove it on the Cloud screen.' }),
+      el('p', { class: 'small', text: 'Send this link to reviewers. It shows "' + name + '" as it is now. You can find it again on the Review tab of each page it includes, and on the Cloud screen.' }),
       el('div', { class: 'row' }, [input, el('button', { class: 'btn btn--primary', type: 'button', onclick: function () { X.copyText(url).then(function () { toast('Link copied', 'success'); }); } }, ['Copy']), el('a', { class: 'btn', href: url, target: '_blank', rel: 'noopener' }, ['Open'])]),
       isHttp ? null : el('p', { class: 'small muted', text: 'This CMS is open from a file, so the link only works on this computer. Make links from the CMS\'s web address (the Vercel site) to send them to others.' })
     ]), buttons: [{ label: 'Done', primary: true }] });
@@ -1880,25 +1995,10 @@
         box.innerHTML = '';
         if (!rows || !rows.length) { box.appendChild(el('p', { class: 'small muted', text: 'No review links yet.' })); return; }
         rows.forEach(function (r) {
-          var url = reviewUrl(r.token, r.scope);
           box.appendChild(el('div', { class: 'rev' }, [
             el('div', {}, [el('strong', { text: r.name }), el('div', { class: 'small muted', text: scopeText(r) + ' · copy from ' + fmtTime(r.updated_at) + (r.created_by_email ? ' · made by ' + who(r.created_by_email) : '') }),
-              el('div', { class: 'small muted', text: (r.allow_comments === false ? 'Comments off' : (r.guest_comments || 0) + ' comment' + (r.guest_comments === 1 ? '' : 's')) + ' · ' + (r.allow_approvals ? (r.guest_signoffs || 0) + ' sign-off' + (r.guest_signoffs === 1 ? '' : 's') + ' from reviewers' : 'approvals off') })]),
-            el('div', {}, [
-              el('button', { class: 'btn btn--xs', type: 'button', onclick: function () { X.copyText(url).then(function () { toast('Link copied', 'success'); }); } }, ['Copy link']),
-              el('a', { class: 'btn btn--xs', href: url, target: '_blank', rel: 'noopener' }, ['Open']),
-              el('button', { class: 'btn btn--xs', type: 'button', title: 'Replace the copy with the pages as they are now; the link stays the same', onclick: function () {
-                var data; try { data = shareData(r.scope); } catch (e) { cloudError(e); return; }
-                if (App.dirty) saveNow();
-                C.shares.update(r.token, data, imageProgress).then(function () { toast('"' + r.name + '" now shows the latest version', 'success'); load(); }, cloudError);
-              } }, ['Update']),
-              menuButton(null, [
-                { label: r.allow_comments === false ? 'Let reviewers comment' : 'Turn off comments (existing ones stay)', onClick: function () { C.shares.setComments(r.token, r.allow_comments === false).then(function () { toast(r.allow_comments === false ? 'Reviewers can comment' : 'Comments turned off for this link', 'success'); load(); }, cloudError); } },
-                { label: r.allow_approvals ? 'Turn off approvals (past sign-offs stay)' : 'Let reviewers approve or ask for changes', onClick: function () { C.shares.setApprovals(r.token, !r.allow_approvals).then(function () { toast(r.allow_approvals ? 'Approvals turned off for this link' : 'Reviewers can now approve or ask for changes', 'success'); load(); }, cloudError); } },
-                '-',
-                { label: 'Delete link', onClick: function () { UI.confirm('Delete review link', 'Delete "' + r.name + '"? The link stops working for everyone who has it. Comments and sign-offs made through it are kept.', 'Delete', true).then(function (ok) { if (ok) C.shares.remove(r.token).then(function () { toast('Review link deleted', 'info'); load(); }, cloudError); }); } }
-              ], { icon: 'more', title: 'More for this link' })
-            ])
+              el('div', { class: 'small muted', text: linkFeatures(r) })]),
+            el('div', {}, linkActions(r, load))
           ]));
         });
       }, function (e) { box.innerHTML = ''; box.appendChild(el('p', { class: 'error small', text: 'Could not load review links: ' + e.message })); });
@@ -1906,7 +2006,7 @@
     load();
     return el('div', { class: 'panel' }, [
       el('h2', { text: 'Review links' }),
-      el('p', { class: 'small', text: 'Read-only copies for reviewers without an account. Each link shows the pages as they were when it was made or last updated.' }),
+      el('p', { class: 'small', text: 'Read-only copies for reviewers without an account. Each link shows the pages as they were when it was made or last updated. A page\'s links are also listed on its Review tab.' }),
       el('div', { class: 'row' }, [el('button', { class: 'btn btn--sm', type: 'button', onclick: function () { shareLinkDialog('project'); } }, [icon('share', 16), ' New review link'])]),
       box
     ]);
@@ -2665,7 +2765,7 @@
         '<h2>Images</h2><p>Every image field has <strong>Library</strong>, <strong>Upload</strong> and placeholder buttons, and accepts a dropped file. The rich text toolbar has an Image button too. Images live in the Media library (browser database, and your project folder when linked), not inside the page, so the project stays small.</p>' +
         '<h2>Saving</h2><p>The working copy lives in about 5 MB of browser storage. Save &amp; export shows what uses it; the CMS warns when it is 70% and 90% full, and <strong>Free up space</strong> removes older page versions or the originals of finished pages. Snapshots and images are kept in the browser\'s database, which has far more room.</p><p>Autosave is always on. For safety, <strong>link a project folder</strong> (Save &amp; export): project.json and images are written there after every change. You can also save <strong>versions</strong> of a page (Ctrl+S), take whole-project <strong>snapshots</strong>, and <strong>save a project file</strong> (Ctrl+Shift+S).</p>' +
         '<h2>Cloud and sharing</h2><p>Once cloud saving is set up (see <code>DEPLOY.md</code>), the <strong>Cloud</strong> screen lets you sign in, upload this project, and share it with colleagues to view or edit. Changes are saved here first and uploaded a few seconds later; colleagues\' changes arrive every minute. Different pages edited at the same time are merged; if two people change the same page, the more recent edit is kept and the other person is told. The chip next to <strong>Saved</strong> in the top bar shows the cloud state, and <strong>Earlier copies</strong> on the Cloud screen restores an hourly cloud copy.</p>' +
-        '<h2>Review and sign-off</h2><ul><li><strong>Changes</strong> in the editor\'s top bar lists everything changed since the original leeds.ac.uk page: blocks added, removed, edited and moved, with the text differences marked. Imported pages keep an untouched copy of the original for this; for other pages, fetch the live page or use the page as it is now. <strong>Word</strong> and <strong>PDF</strong> turn it into a change list for whoever edits the page in Jadu. Save &amp; export has change lists for every page.</li><li>The <strong>Review</strong> tab in the inspector checks the page (alt text, heading levels, link text, links to missing pages and other websites), shows the sign-off status and holds comments. Click a block in the preview while on the Review tab to comment on that block.</li><li><strong>Sign-off</strong>: send a page for review; anyone the project is shared with can approve it or request changes. Each step records who and when, and the tab says if the page was edited after it was approved. Sign-off and comments are saved in the cloud.</li><li><strong>Review links</strong> (editor &#8943; menu, Review tab or Cloud screen) give reviewers without an account a read-only copy of a page, a section or the whole project. Update a link on the Cloud screen to show the latest version. Reviewers can comment with their name, on the page or on a part they pick; their comments appear on the Review tab. If you tick it when making the link, reviewers can also approve or ask for changes, with their name and role; that is recorded in the sign-off history like the team\'s. Switch comments and approvals for a link on or off in its &#8943; menu on the Cloud screen.</li><li><strong>Jadu checklist</strong>: in Changes, whoever updates Jadu ticks each change off as it is made. Progress shows in the bar and on the Pages screen; a change edited again after it was ticked is marked so. Change lists in Word and PDF have tick boxes.</li><li><strong>Live updates</strong>: with the cloud, comments, sign-off, ticks and colleagues\' saves arrive within seconds. <strong>Email notifications</strong> are optional (DEPLOY.md, part 7); choose yours on the Cloud screen.</li></ul>' +
+        '<h2>Review and sign-off</h2><ul><li><strong>Changes</strong> in the editor\'s top bar lists everything changed since the original leeds.ac.uk page: blocks added, removed, edited and moved, with the text differences marked. Imported pages keep an untouched copy of the original for this; for other pages, fetch the live page or use the page as it is now. <strong>Word</strong> and <strong>PDF</strong> turn it into a change list for whoever edits the page in Jadu. Save &amp; export has change lists for every page.</li><li>The <strong>Review</strong> tab in the inspector checks the page (alt text, heading levels, link text, links to missing pages and other websites), shows the sign-off status and holds comments. Click a block in the preview while on the Review tab to comment on that block.</li><li><strong>Sign-off</strong>: <strong>Send for review</strong> marks the page as in review, so anyone the project is shared with can approve it or request changes. In the same step it makes a review link for reviewers without an account, or updates the page\'s existing links so they show the latest version. Each step records who and when, and the tab says if the page was edited after it was approved. Sign-off and comments are saved in the cloud.</li><li><strong>Review links</strong> give reviewers without an account a read-only copy of a page, a section or the whole project. Each page\'s Review tab lists the links that include it and says when one shows an older version; <strong>Update</strong> fixes that and keeps the link. Make one with Send for review, <strong>New review link</strong> on the Review tab, the editor &#8943; menu or the Cloud screen, which lists every link. Reviewers can comment with their name, on the page or on a part they pick; their comments appear on the Review tab. If you tick it when making the link, reviewers can also approve or ask for changes, with their name and role; that is recorded in the sign-off history like the team\'s. Switch comments and approvals for a link on or off in its &#8943; menu.</li><li><strong>Jadu checklist</strong>: in Changes, whoever updates Jadu ticks each change off as it is made. Progress shows in the bar and on the Pages screen; a change edited again after it was ticked is marked so. Change lists in Word and PDF have tick boxes.</li><li><strong>Live updates</strong>: with the cloud, comments, sign-off, ticks and colleagues\' saves arrive within seconds. <strong>Email notifications</strong> are optional (DEPLOY.md, part 7); choose yours on the Cloud screen.</li></ul>' +
         '<h2>Keyboard shortcuts</h2><ul><li><kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Y</kbd> undo / redo (outside text fields)</li><li><kbd>/</kbd> open the block inserter (outside text fields)</li><li><kbd>Ctrl</kbd>+<kbd>K</kbd> insert a link while editing rich text</li><li><kbd>Ctrl</kbd>+<kbd>S</kbd> save a version of the page</li><li><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd> save the project to file</li><li><kbd>Esc</kbd> close dialogs / cancel in-place editing</li></ul>' +
         '<h2>Linking pages</h2><p>Give links the path of another page in this project (for example <code>/about</code>) and they navigate between pages in the viewer and in HTML exports.</p>' +
         '<h2>Fonts</h2><p>Freight fonts load from Adobe Fonts when you are online; otherwise the design system fallback fonts are used.</p>'
