@@ -14,7 +14,7 @@ Parts 1 and 2 on their own give you the CMS online, with each person's work kept
 ## Before you start
 
 - **Tell IT.** University work on personal Vercel and Supabase accounts is worth a short conversation, even for public web content. Ask whether they prefer an institutional account. The guide works the same either way.
-- **Free plans and their limits.** Vercel's free Hobby plan is meant for personal, non-commercial use, so for ongoing team use the Pro plan (about 20 USD a month per member) is the safe choice. Supabase's free plan pauses a project after a week with no visits; reopening it from the Supabase dashboard brings it back. Its Pro plan is about 25 USD a month.
+- **Free plans and their limits.** Vercel's free Hobby plan is meant for personal, non-commercial use, so for ongoing team use the Pro plan (about 20 USD a month per member) is the safe choice. Supabase's free plan pauses a project after a week with no activity. The site prevents that itself: a scheduled job on Vercel (`api/keepalive.js`) makes one small database request every morning. If a project does pause, reopening it from the Supabase dashboard brings it back. Supabase's Pro plan is about 25 USD a month.
 - **Use Edge or Chrome.** Folder drag and drop in step 1 needs one of them.
 - You already have a GitHub account (`liamdaly122`). Vercel and Supabase both let you sign in with it, so there are no new passwords to manage for those.
 
@@ -257,7 +257,7 @@ If emails do not arrive, the **Logs** page in Resend shows what it received, and
 | A colleague sees grey placeholder images | The uploader's browser had not finished uploading. Ask them to wait for the **Cloud** chip, then click **Sync now** on your Cloud screen. |
 | The site loads but the Cloud screen says "not set up yet" | `assets/cms/cloud-config.js` on GitHub is still empty, or Vercel has not finished redeploying. |
 | "Wrong key in cloud-config.js" | A secret key was pasted. Replace it with the publishable key and create a new secret key in Supabase. |
-| Everything stopped working after a quiet week | The free Supabase project paused. Open the Supabase dashboard and click **Restore project**. |
+| Everything stopped working after a quiet week | The free Supabase project paused. Open the Supabase dashboard and click **Restore project**. Then check the daily keep-alive job: in Vercel, open the project, **Settings**, **Cron Jobs**. It should list `/api/keepalive`; **View logs** shows each run, and a run that says `"ok":true` reached the database. |
 | Import by URL fails online | Only leeds.ac.uk addresses are allowed. Use the grabber or paste the HTML for anything else. |
 | "The cloud database needs an update for this feature" | Run the whole of `supabase/setup.sql` again (Part 6). |
 | A review link says it does not work | The link was deleted, or only part of it was copied. Copy it again from the Cloud screen. |
@@ -269,8 +269,9 @@ If emails do not arrive, the **Logs** page in Resend shows what it received, and
 
 | File | Purpose |
 |---|---|
-| `vercel.json` | Tells Vercel to serve the folder as it is, and routes `/__proxy` to the import proxy. |
+| `vercel.json` | Tells Vercel to serve the folder as it is, routes `/__proxy` to the import proxy, and schedules the daily keep-alive job. |
 | `api/proxy.js` | Online version of the local server's proxy. It fetches leeds.ac.uk pages and images for **Import by URL** and image exports. |
+| `api/keepalive.js` | Run by Vercel every morning (the `crons` entry in `vercel.json`). It makes one small read-only database request so the free Supabase project never pauses. It reads the project address from `cloud-config.js`, so there is nothing to set up. Optional: add an environment variable `CRON_SECRET` in Vercel (any long random text) and only Vercel's scheduler can call it. |
 | `supabase/setup.sql` | Creates the tables, access rules, sharing functions, hourly history, comments, sign-off, review links and the two image buckets. |
 | `assets/cms/cloud-config.js` | The two values from Supabase. Empty means cloud saving is off. |
 | `assets/cms/cloud.js` | Sign-in, upload and download, merging, sharing, history, comments, sign-off and review links. Talks to Supabase directly, so there is no build step. |

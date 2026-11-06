@@ -47,7 +47,7 @@ Real-time co-editing of the same page is out of scope; one editor per page at a 
 ## Costs and limits
 
 - Vercel free tier: fine for ten users of a static site.
-- Supabase free tier: 500 MB database, 1 GB storage, two projects. Enough for prototypes, but free projects are paused after a week without traffic; someone opens it weekly, or move to the Pro tier (about 25 USD a month).
+- Supabase free tier: 500 MB database, 1 GB storage, two projects. Enough for prototypes, but free projects are paused after a week without traffic. A daily Vercel cron job (`api/keepalive.js`) keeps it active; the Pro tier (about 25 USD a month) removes the limit altogether.
 - Images are the main storage use. The current resize-to-1600px rule keeps them small.
 
 ## Things to check first
