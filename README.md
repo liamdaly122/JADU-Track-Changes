@@ -139,7 +139,19 @@ leeds-cms/
   assets/vendor/          html2canvas (PNG export)
   grabber/grabber.js      the page grabber; grabber/bookmarklet.html is the no-install version
   chrome-extension/       unpacked Chrome/Edge extension (manifest, background, grabber, icons)
+  tests/review-layout.js  layout check for review links (see below)
 ```
+
+### Layout check for review links
+
+`tests/review-layout.js` checks that review links lay out every block exactly as the published page does. It builds a document page and a homepage with every block (default content, plus a single fact and blocks without titles), draws each one as published, as a review link and in the editor preview, at 1024, 1280, 1440 and 1920 pixels wide, and compares each block's left edge, width, height and the gap above it. Run it after changing `render.js`, `blocks.js`, `review.html` or the design system CSS. It needs Node.js and Playwright (`npm install playwright`):
+
+```
+node tests/review-layout.js
+node tests/review-layout.js --shots
+```
+
+The second form also saves screenshots of any page with differences in `tests/output`. The check fails if a review link differs from the published page. Differences in the editor preview are listed as warnings: the editor wraps each block in a box for its toolbar and outline, so some spacing differs there, and a few small homepage blocks (Key facts, Year of entry, Pagination, the course search banner) sit differently.
 
 ### How the theme works
 
