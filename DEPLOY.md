@@ -7,9 +7,9 @@ This guide takes the Leeds prototyping CMS from a folder on your laptop to a web
 | 1. GitHub | A private online copy of the code, and the place Vercel reads it from | 10 minutes |
 | 2. Vercel | The CMS at a web address, for example `https://leeds-prototyping-cms.vercel.app` | 5 minutes |
 | 3. Supabase | Sign-in, projects saved online, sharing, images and hourly backups | 20 minutes |
-| 4. First use | Your current work uploaded and shared | 10 minutes |
+| 4. First use | Accounts, your projects, sharing | 10 minutes |
 
-Parts 1 and 2 on their own give you the CMS online, with each person's work kept in their own browser as now. Part 3 adds the shared cloud.
+Parts 1 and 2 on their own give you the CMS online, with each person's work kept in their own browser. Part 3 adds accounts and the shared cloud: from then on the CMS shows a sign-in screen until someone signs in.
 
 ## Before you start
 
@@ -96,21 +96,48 @@ What changes compared with double-clicking `index.html`:
 
 Running the file again later is safe.
 
-### Only people you add can sign in
+### Accounts: who can sign up, and the emails
 
-1. Go to **Authentication**, then **Sign In / Providers**. On older layouts this is **Providers**, under **Configuration**.
+Colleagues create their own accounts on the CMS sign-in screen. `setup.sql` only lets **@leeds.ac.uk** addresses (and their subdomains) do that. Supabase needs three settings for it.
+
+**1. Allow sign-ups**
+
+1. Go to **Authentication**, then **Sign In / Providers** (on older layouts, **Providers** under **Configuration**).
 2. Check that **Email** is enabled.
-3. Turn **off** **Allow new users to sign up**, then click **Save**. Nobody can now create an account; only the accounts you add can sign in.
+3. Turn **on** **Allow new users to sign up**.
+4. Leave **Confirm email** on. New accounts then confirm their address from an email before they can sign in, so nobody can make an account with someone else's address.
+5. Click **Save**.
 
-### Add accounts
+**2. Tell Supabase where the CMS is**
 
-1. Go to **Authentication**, then **Users**.
-2. Click **Add user**, then **Create new user**.
-3. Enter the email address and a temporary password, tick **Auto Confirm User**, and click **Create user**.
-4. Do this for yourself and for each colleague.
-5. Send each colleague their temporary password by Teams. Ask them to change it on the CMS Cloud screen after signing in.
+1. Go to **Authentication**, then **URL Configuration**.
+2. Set **Site URL** to your Vercel address, for example `https://jadutrackchange.vercel.app`.
+3. Under **Redirect URLs**, click **Add URL** and add the same address followed by `/**`, for example `https://jadutrackchange.vercel.app/**`. The links in confirmation and password emails come back here.
 
-To reset a password later, open the user in this list and set a new one.
+**3. Send the emails through Resend**
+
+Supabase's own email service only sends to the people in your Supabase team, a few an hour, so colleagues would never get their confirmation emails. Use Resend instead (the same account as part 7, if you set that up):
+
+1. In Resend, add and verify a sending domain (**Domains**). Resend's test address only delivers to your own inbox, so a verified domain is needed for colleagues. If you cannot verify a domain, see the note below.
+2. Create an API key (**API Keys**, **Create API Key**, permission **Sending access**).
+3. In Supabase, go to **Authentication**, then **Emails**, then **SMTP Settings**, and turn on **Enable custom SMTP**:
+   - **Sender email**: an address on your verified domain, for example `cms@your-domain`
+   - **Sender name**: `Leeds prototyping CMS`
+   - **Host**: `smtp.resend.com`, **Port**: `465`
+   - **Username**: `resend`, **Password**: the Resend API key
+4. Click **Save**. Under **Rate Limits**, raise **emails sent per hour** to 30 or so.
+
+> **No domain to verify?** You can turn **Confirm email** off instead (step 1). Accounts then work straight away, with no email at all. The catch: anyone who knows a colleague's Leeds address could make an account with it. For a small pilot with people you know, that may be acceptable; for anything wider, set up the emails.
+
+**Other addresses.** To let other domains sign up, run this in the SQL Editor (it replaces the list):
+
+```sql
+update public.app_settings set allowed_email_domains = array['leeds.ac.uk', 'example.org'];
+```
+
+An empty list (`array[]::text[]`) lets anyone sign up.
+
+**Adding an account yourself.** Under **Authentication**, **Users**, **Add user**, **Create new user**, with **Auto Confirm User** ticked, still works (for an allowed address). The person signs in with the password you set and changes it from the account button in the CMS.
 
 ### Connect the CMS to Supabase
 
@@ -130,62 +157,54 @@ Both values are safe to have in the code. The database rules from `setup.sql` de
 
 > **Never** paste the **secret** key or the **service_role** key into the CMS. Either one bypasses every rule in the database. The CMS refuses to use them and shows a warning. If one is ever exposed, create a new secret key in Supabase so the old one stops working.
 
-### Optional
-
-Under **Authentication**, then **URL Configuration**, set **Site URL** to your Vercel address. Supabase only uses it in emails, which this setup does not send.
-
 ---
 
 ## Part 4: First use
 
+### Already using the cloud? Updating to accounts
+
+If you set the cloud up before accounts arrived, do this once after merging the update:
+
+1. In Supabase, run the whole of `supabase/setup.sql` again (SQL Editor). It moves every page of every project into its own row and keeps everything else. Nothing is deleted.
+2. Make the three settings in Part 3, **Accounts: who can sign up, and the emails**.
+3. Ask everyone to reload any CMS tab they have open. A tab opened before the update cannot save any more (it shows **Cloud: problem**) until it is reloaded, so it can never save over the new layout.
+4. Existing accounts keep working. On first sign-in, each person is asked nothing new: their projects are on the **Projects** screen.
+
+Work a browser kept before accounts is not lost. If that browser was connected to a cloud project, it is brought into that project the first time it is opened. If not, the **Projects** screen shows **Work from before accounts** with **Make it a project**.
+
 ### Sign in
 
-1. Open your Vercel address.
-2. Click the **cloud icon** in the left rail to open the Cloud screen.
-3. Sign in with the email and temporary password, then click **Change password**.
+1. Open your Vercel address. Until you sign in, the CMS shows only the sign-in screen.
+2. Click **Create an account**, with your Leeds address. Confirm it from the email, if Confirm email is on.
+3. A short tour runs the first time. Watch it again any time from **Help** or the account button (your initials at the foot of the left-hand bar).
 
-### Move your current work online
+### Projects
 
-Your existing pages are in the browser storage of the double-clicked copy on your laptop. There are two ways to get them online.
+The **Projects** screen (the folder icon at the top of the left-hand bar) lists your projects and the ones shared with you. **New project** starts one, empty or with example pages; **From a project file** turns a saved project file into a project. Click a project to open it; the CMS remembers it, so next time you are taken straight there.
 
-**Upload from the laptop copy (recommended)**
-
-1. Double-click `index.html` in the OneDrive folder.
-2. Go to the **Cloud** screen, sign in, and click **Upload to the cloud**. Pages, sections, site settings and images all go up.
-3. On the Vercel site, go to the **Cloud** screen and click **Open** next to the project.
-
-**Or use a project file**
-
-1. In the laptop copy, go to **Save and export** and click **Save project to file**.
-2. On the Vercel site, click the open-folder icon in the top bar and open that file.
-3. On the **Cloud** screen, click **Upload to the cloud**.
-
-From then on, the top bar shows a **Cloud** chip next to **Saved**:
+Each browser keeps a copy of the projects it opens, so they open straight away and you can keep working if the connection drops. The top bar shows the state:
 
 | Chip | Meaning |
 |---|---|
-| Cloud | Everything is uploaded |
-| Cloud: waiting / saving | An upload is pending or in progress |
-| Cloud: offline | No connection; changes are kept and uploaded later |
-| Cloud: signed out | Changes are kept in this browser until you sign in |
+| Cloud | Everything is saved |
+| Cloud: waiting / saving | A save is about to happen or happening |
+| Cloud: offline | No connection; changes are kept and saved later |
 | Cloud: view only | You can view this project but not change it |
-| Cloud: problem | Hover the chip, or open the Cloud screen, for the reason |
+| Cloud: problem | Hover the chip, or open **Sharing**, for the reason |
 
 ### Share with colleagues
 
-1. Make sure they have an account (Part 3, **Add accounts**).
-2. On the **Cloud** screen, click **Share**, enter their email and choose **Can edit** or **Can view**.
-3. They sign in on the Vercel site, open the **Cloud** screen and click **Open**.
+1. Open the project, then **Sharing** (the share icon in the left-hand bar).
+2. Under **People**, enter their email address and choose **Can edit** or **Can view**.
+3. If they have an account, the project appears on their Projects screen straight away. If not, they are **invited**: they join as soon as they create an account with that address. With notifications set up (part 7), they also get an email with the link.
 
-### How shared editing behaves
+### How working together behaves
 
-- **Saving.** Every change is saved in the browser straight away, as before, and uploaded about three seconds later.
-- **Colleagues' changes.** These arrive every minute, and whenever you come back to the tab.
-- **Different pages.** Two people editing different pages, sections or the site settings at the same time never overwrite each other. Their changes are merged.
-- **The same page.** If two people edit the same page at the same time, the more recent edit is kept and the other person sees a notice. If you have that page open, it reloads with their version.
-- **Earlier copies.** The cloud keeps a copy of each project at most once an hour while it changes, the last 48. Find them under **Cloud**, then **Earlier copies**. Restoring one first snapshots your current copy in this browser.
-- **Replacing the whole project.** Opening a project file, restoring a snapshot or resetting the project while connected asks first. Choose **Disconnect, then continue** to leave the cloud copy alone.
-- **Disconnecting.** **Disconnect** stops syncing and keeps your copy in the browser. **Sign out** also keeps it, and syncing resumes when you sign back in.
+- **Saving.** Every change is saved in the browser straight away and to the cloud about two seconds later. Only the page that changed is sent.
+- **Colleagues' changes.** These arrive within seconds (live updates), with a check every minute as a fallback.
+- **The same page.** If two people edit the same page, changes to different blocks are merged, so both are kept. Only when both change the same block is the more recent edit kept, and the other person is told.
+- **Who is where.** Colleagues' initials show in the top bar, next to the pages they have open on the Pages screen, and on the block they picked in the preview. The editor says when someone else has your page open.
+- **Undoing.** The cloud keeps a copy of each page at most once an hour while it changes (the last 48): open the page, then the **Page** tab, **Versions**, **Hourly cloud copies**. Deleted pages can be brought back from **Recently deleted** on the Pages screen. Site settings and sections have their own hourly copies under **Sharing**.
 - **Exports.** Exports, project files and the linked project folder all work as before.
 
 ---
@@ -207,7 +226,7 @@ These features keep their data in Supabase, so the database needs the extra tabl
 1. On GitHub, open `supabase/setup.sql` and copy the whole file.
 2. In Supabase, go to **SQL Editor**, click **New query**, paste it in and click **Run**. It should say "Success. No rows returned".
 
-Running the file again is safe: it only adds what is missing and keeps every project, image, comment and account. It also creates a second storage bucket, `cms-shares`, which holds the images in review links, and adds a table to Supabase Realtime for live updates. Realtime is on by default in Supabase, so there is nothing else to switch on; the Cloud screen says "live updates on" once it is working.
+Running the file again is safe: it only adds what is missing and keeps every project, image, comment and account. It also creates a second storage bucket, `cms-shares`, which holds the images in review links, and adds a table to Supabase Realtime for live updates. Realtime is on by default in Supabase, so there is nothing else to switch on; the Sharing screen says "live updates on" once it is working.
 
 Then, in the editor:
 
@@ -239,7 +258,7 @@ The CMS can email people when a page is sent for review, approved or sent back, 
     where id = 1;
    ```
 6. **Check pg_net is on.** In Supabase, **Database**, **Extensions**: `pg_net` should be enabled. `setup.sql` turns it on when it can.
-7. **Choose what to get.** Everyone now sees **Email notifications** on the Cloud screen, per project: sign-off changes (on by default) and new comments (off by default). Nobody is emailed about their own actions.
+7. **Choose what to get.** Everyone now sees **Email notifications** on the Sharing screen, per project: sign-off changes (on by default) and new comments (off by default). Nobody is emailed about their own actions.
 
 To switch emails off again: `update public.notify_settings set enabled = false where id = 1;`
 
@@ -251,18 +270,22 @@ If emails do not arrive, the **Logs** page in Resend shows what it received, and
 
 | What you see | What to do |
 |---|---|
-| "Email or password not recognised" | Check the user exists under Authentication, Users, and was created with **Auto Confirm User** ticked. |
+| "Email or password not recognised" | Check the user exists under Authentication, Users. If they made the account themselves, they need to confirm it from the email first. |
+| "Confirm your email address first" | Open the link in the confirmation email, or click **Send the confirmation email again**. No email arriving means the custom SMTP settings in Part 3 are missing or wrong. |
+| "Accounts are limited to leeds.ac.uk email addresses" | Use a Leeds address, or add the domain (Part 3, **Other addresses**). |
+| "New accounts are switched off" | Turn on **Allow new users to sign up** (Part 3). |
+| A confirmation or password link says it has expired | Links work once, for a limited time. Ask for a new one from the sign-in screen. Links opening the wrong site: check **Site URL** and **Redirect URLs** (Part 3). |
+| Cloud: problem, "permission denied for table projects" | That tab was opened before the update. Reload it. |
 | Cloud: problem, with "permission denied" or "relation does not exist" | `setup.sql` did not run completely. Run the whole file again. |
-| "No account for …" when sharing | Add the person under Authentication, Users first. |
-| A colleague sees grey placeholder images | The uploader's browser had not finished uploading. Ask them to wait for the **Cloud** chip, then click **Sync now** on your Cloud screen. |
-| The site loads but the Cloud screen says "not set up yet" | `assets/cms/cloud-config.js` on GitHub is still empty, or Vercel has not finished redeploying. |
+| A colleague sees grey placeholder images | The uploader's browser had not finished uploading. Ask them to wait for the **Cloud** chip, then click **Check now** on your Sharing screen. |
+| The site opens straight into the editor with no sign-in screen | `assets/cms/cloud-config.js` on GitHub is still empty, or Vercel has not finished redeploying. Without it the CMS works on one project in that browser only. |
 | "Wrong key in cloud-config.js" | A secret key was pasted. Replace it with the publishable key and create a new secret key in Supabase. |
 | Everything stopped working after a quiet week | The free Supabase project paused. Open the Supabase dashboard and click **Restore project**. Then check the daily keep-alive job: in Vercel, open the project, **Settings**, **Cron Jobs**. It should list `/api/keepalive`; **View logs** shows each run, and a run that says `"ok":true` reached the database. |
 | Import by URL fails online | Only leeds.ac.uk addresses are allowed. Use the grabber or paste the HTML for anything else. |
 | "The cloud database needs an update for this feature" | Run the whole of `supabase/setup.sql` again (Part 6). |
-| A review link says it does not work | The link was deleted, or only part of it was copied. Copy it again from the page's Review tab or the Cloud screen. |
-| "Browser storage is …% full" | Click **Free up space**: remove older page versions, or the originals of finished pages. Save & export shows what takes the room. |
-| The Cloud screen never says "live updates on" | Nothing is lost: colleagues' changes still arrive within a minute. Check Realtime is enabled for the project in Supabase (Project Settings). |
+| A review link says it does not work | The link was deleted, or only part of it was copied. Copy it again from the page's Review tab or the Sharing screen. |
+| "The latest change could not be saved in this browser" | The disk is nearly full, or the browser is in private mode. Free some disk space; **Free up space** on Save & export removes older page versions and the originals of finished pages. |
+| The Sharing screen never says "live updates on" | Nothing is lost: colleagues' changes still arrive within a minute. Check Realtime is enabled for the project in Supabase (Project Settings). |
 | No notification emails | See the end of part 7. |
 
 ## What the new files do
@@ -272,9 +295,10 @@ If emails do not arrive, the **Logs** page in Resend shows what it received, and
 | `vercel.json` | Tells Vercel to serve the folder as it is, routes `/__proxy` to the import proxy, and schedules the daily keep-alive job. |
 | `api/proxy.js` | Online version of the local server's proxy. It fetches leeds.ac.uk pages and images for **Import by URL** and image exports. |
 | `api/keepalive.js` | Run by Vercel every morning (the `crons` entry in `vercel.json`). It makes one small read-only database request so the free Supabase project never pauses. It reads the project address from `cloud-config.js`, so there is nothing to set up. Optional: add an environment variable `CRON_SECRET` in Vercel (any long random text) and only Vercel's scheduler can call it. |
-| `supabase/setup.sql` | Creates the tables, access rules, sharing functions, hourly history, comments, sign-off, review links and the two image buckets. |
+| `supabase/setup.sql` | Creates the tables, access rules, accounts and invitations, the pages table with hourly page copies, sharing functions, comments, sign-off, review links and the two image buckets. |
 | `assets/cms/cloud-config.js` | The two values from Supabase. Empty means cloud saving is off. |
-| `assets/cms/cloud.js` | Sign-in, upload and download, merging, sharing, history, comments, sign-off and review links. Talks to Supabase directly, so there is no build step. |
+| `assets/cms/cloud.js` | Accounts (sign in, sign up, password emails), projects, saving page by page with block-level merging, presence, sharing, history, comments, sign-off and review links. Talks to Supabase directly, so there is no build step. |
+| `assets/cms/tour.js` | The animated tour shown after sign-up. |
 | `assets/cms/review.js` | Compares a page with its original for the Changes view and change lists, and runs the page checks. |
 | `review.html` | The page reviewers see when they open a review link. It needs no account and stores nothing in their browser. |
 | `.gitignore` | Keeps exported project files out of the repository if you later use Git or GitHub Desktop. |

@@ -1,6 +1,6 @@
 # Cloud plan: shared, account-based Leeds prototyping CMS
 
-Status: written 3 November 2026. **Phases 1 to 3 built on 4 November 2026** with two simplifications: accounts are email and password created by the admin in Supabase (Microsoft sign-in can follow once IT registers an app), and each project is stored as one JSON document merged page by page, rather than separate page and section tables. Setup steps are in `DEPLOY.md`.
+Status: written 3 November 2026. Accounts with self sign-up, one row per page with block-level merging, presence and the IndexedDB working copy built on 6 November 2026. **Phases 1 to 3 built on 4 November 2026** with two simplifications: accounts are email and password created by the admin in Supabase (Microsoft sign-in can follow once IT registers an app), and each project is stored as one JSON document merged page by page, rather than separate page and section tables. Setup steps are in `DEPLOY.md`.
 
 ## Goal
 
