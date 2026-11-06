@@ -1,11 +1,19 @@
 /* Leeds prototyping CMS - data store
-   Site, pages and sections live in localStorage under one key (autosaved on every change). Images live in
-   IndexedDB (media.js). Project files carry everything, including images, as one JSON document. */
+   The open project (site, pages and sections) is held in memory and written to the browser's database (IndexedDB)
+   after every change, one entry per project: "local" when cloud saving is not set up, otherwise one per cloud
+   project and person. The database has far more room than the 5 MB of localStorage the CMS used before; work
+   left there by older versions is picked up once (legacy()). Images live in the same database (media.js).
+   Project files carry everything, including images, as one JSON document. */
 (function () {
   'use strict';
 
-  var KEY = 'leeds-cms:v1';
+  var KEY = 'leeds-cms:v1';                 // where older versions kept the project (localStorage)
+  var MOVED_KEY = 'leeds-cms:v1-moved';      // set once that copy has been taken over
   var PRESETS_KEY = 'leeds-cms:theme-presets';
+  var OPEN_KEY = 'leeds-cms:open-project';   // which project the CMS has open, for view.html
+  function M() { return window.UOL_MEDIA; }
+  // tells other tabs (the page viewer) that the open project was saved
+  var channel = null; try { channel = window.BroadcastChannel ? new BroadcastChannel('leeds-cms') : null; } catch (e) { channel = null; }
 
   function uid(prefix) { return (prefix || 'id') + '_' + Math.random().toString(36).slice(2, 8) + Date.now().toString(36).slice(-4); }
   function deepClone(obj) { return JSON.parse(JSON.stringify(obj)); }
@@ -14,19 +22,66 @@
   }
   function now() { return new Date().toISOString(); }
 
+  function valid(d) { return !!(d && d.site && Array.isArray(d.pages)); }
+
   var Store = {
     data: null,
+    key: null,          // which project is open: 'local', or '<user id>:<cloud project id>'
+    writing: null, dirty: false, lastError: null,
 
-    load: function () {
-      var raw = null;
-      try { raw = localStorage.getItem(KEY); } catch (e) { raw = null; }
-      if (raw) { try { this.data = JSON.parse(raw); } catch (e) { this.data = null; } }
-      if (!this.data || !this.data.site || !Array.isArray(this.data.pages)) {
-        this.data = window.UOL_SEED ? deepClone(window.UOL_SEED()) : { site: {}, pages: [], sections: [] };
-        this.save();
-      }
+    /* open a project from the browser's database; resolves true if this browser had a copy */
+    open: function (key) {
+      var self = this;
+      return M().open().then(function () { return M().kvGet('project:' + key); }).then(function (d) {
+        if (!valid(d)) return false;
+        self.key = key; self.data = d; self.migrate(); self.remember();
+        return true;
+      });
+    },
+    /* make data the open project, under key, and write it */
+    remember: function () { try { if (this.key) localStorage.setItem(OPEN_KEY, this.key); } catch (e) {} },
+    openKey: function () { try { return localStorage.getItem(OPEN_KEY); } catch (e) { return null; } },
+    use: function (key, data) {
+      this.key = key; this.remember();
+      this.data = valid(data) ? data : { site: (data && data.site) || {}, pages: (data && data.pages) || [], sections: (data && data.sections) || [] };
       this.migrate();
+      this.save();
       return this.data;
+    },
+    close: function () { var f = this.flush(); this.key = null; this.data = null; return f; },
+    /* the starting content: the example site and pages, or (blank) just the site settings */
+    seed: function (blank) {
+      var d = window.UOL_SEED ? deepClone(window.UOL_SEED()) : { site: {}, pages: [], sections: [] };
+      if (blank) { d.pages = []; d.sections = []; }
+      return d;
+    },
+    /* the project older versions kept in localStorage, if there is one and it has not been taken over yet */
+    legacy: function () {
+      try {
+        if (localStorage.getItem(MOVED_KEY)) return null;
+        var raw = localStorage.getItem(KEY); if (!raw) return null;
+        var d = JSON.parse(raw); return valid(d) ? d : null;
+      } catch (e) { return null; }
+    },
+    /* mark the old copy as taken over; it stays in localStorage for now, as a fallback */
+    legacyDone: function () { try { localStorage.setItem(MOVED_KEY, now()); } catch (e) {} },
+    /* true when data is just the untouched example content */
+    isSeed: function (d) {
+      if (!window.UOL_SEED || !d) return false;
+      var s = window.UOL_SEED();
+      var titles = function (x) { return (x.pages || []).map(function (p) { return p.title + '|' + (p.blocks || []).length; }).join(','); };
+      return titles(s) === titles(d) && (d.pages || []).every(function (p) { return !(p.revisions && p.revisions.length) && !p.source; });
+    },
+    /* local mode (no cloud): the browser's own project, taking over the old localStorage copy the first time */
+    openLocal: function () {
+      var self = this;
+      return this.open('local').then(function (found) {
+        if (found) return self.data;
+        var old = self.legacy();
+        self.use('local', old || self.seed(false));
+        if (old) self.legacyDone();
+        return self.flush().then(function () { return self.data; });
+      });
     },
 
     migrate: function () {
@@ -45,13 +100,35 @@
       this.data.sections.forEach(function (s) { s.pages = (s.pages || []).filter(function (id) { return ids[id]; }); });
     },
 
+    /* write the open project. The write starts straight away; saves made while one is running are combined into
+       one more write when it finishes, so the database always ends up with the latest state. */
     save: function () {
-      try { localStorage.setItem(KEY, JSON.stringify(this.data)); this.lastError = null; }
-      catch (e) { this.lastError = e; return false; }
+      if (!this.key || !this.data) return false;
+      this.dirty = true;
+      if (!this.writing) this.write();
       if (this.onSave) { try { this.onSave(); } catch (e) { /* cloud sync must never break local saving */ } }
       return true;
     },
-    onSave: null,
+    write: function () {
+      var self = this, key = 'project:' + this.key;
+      this.dirty = false;
+      // IndexedDB copies the value when put() is called, so later edits do not leak into this write
+      this.writing = M().open().then(function () { return M().kvSet(key, self.data); }).then(function (ok) {
+        self.lastError = ok ? null : new Error('Could not save in this browser\'s database');
+        if (!ok && self.onError) { try { self.onError(self.lastError); } catch (e) {} }
+        if (ok && channel) { try { channel.postMessage({ saved: key.slice(8) }); } catch (e) {} }
+      }).then(function () {
+        self.writing = null;
+        if (self.dirty && self.key) return self.write();
+      });
+      return this.writing;
+    },
+    /* resolves once everything saved so far is in the database */
+    flush: function () { return this.writing ? this.writing.then(function () {}) : Promise.resolve(); },
+    /* a project kept in this browser that is not open (for example a cloud project's copy) */
+    cached: function (key) { return M().open().then(function () { return M().kvGet('project:' + key); }).then(function (d) { return valid(d) ? d : null; }); },
+    forget: function (key) { return M().open().then(function () { return M().kvSet('project:' + key, null); }); },
+    onSave: null, onError: null,
 
     reset: function () { this.data = deepClone(window.UOL_SEED()); this.save(); },
 
@@ -189,19 +266,24 @@
     },
 
     /* ---------- storage guard ----------
-       Browsers give each site about 5 MB of localStorage (counted in characters). Pages, their saved versions and
-       the originals kept for Changes all live in one entry, so this reports what takes the room. */
-    LIMIT: 5000000,
+       The project lives in the browser's database, which can use a large share of the disk (the browser decides;
+       quota() asks it). This reports what takes the room in the open project. */
+    LIMIT: 500 * 1024 * 1024,
+    quota: function () {
+      var self = this;
+      if (!(navigator.storage && navigator.storage.estimate)) return Promise.resolve(null);
+      return navigator.storage.estimate().then(function (e) { if (e && e.quota) self.LIMIT = e.quota; return e; }).catch(function () { return null; });
+    },
     storageReport: function () {
       var r = { versions: 0, originals: 0, content: 0, other: 0, total: 0, limit: this.LIMIT, pages: [] };
-      try { for (var k in localStorage) if (Object.prototype.hasOwnProperty.call(localStorage, k)) { var n = k.length + (localStorage.getItem(k) || '').length; r.total += n; if (k !== KEY) r.other += n; } } catch (e) {}
+      try { r.total = JSON.stringify(this.data).length; } catch (e) {}
       (this.data.pages || []).forEach(function (p) {
         var v = p.revisions && p.revisions.length ? JSON.stringify(p.revisions).length : 0;
         var o = p.source && p.source.original ? JSON.stringify(p.source.original).length : 0;
         r.versions += v; r.originals += o;
         r.pages.push({ id: p.id, title: p.title, versions: v, versionCount: (p.revisions || []).length, original: o });
       });
-      r.content = Math.max(0, r.total - r.other - r.versions - r.originals);
+      r.content = Math.max(0, r.total - r.versions - r.originals);
       r.share = r.total / r.limit;
       r.level = r.share >= 0.9 ? 'danger' : r.share >= 0.7 ? 'warn' : 'ok';
       return r;
@@ -215,12 +297,8 @@
     },
 
     /* ---------- helpers ---------- */
-    uid: uid, clone: deepClone, slugify: slugify,
-    storageUsage: function () {
-      var total = 0;
-      try { for (var k in localStorage) if (Object.prototype.hasOwnProperty.call(localStorage, k)) total += (localStorage.getItem(k) || '').length * 2; } catch (e) {}
-      return total;
-    }
+    uid: uid, clone: deepClone, slugify: slugify, valid: valid,
+    storageUsage: function () { try { return JSON.stringify(this.data || {}).length; } catch (e) { return 0; } }
   };
 
   window.UOL_STORE = Store;
