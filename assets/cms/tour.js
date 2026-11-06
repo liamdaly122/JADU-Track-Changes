@@ -2,7 +2,8 @@
    Eight short steps, each with a small moving picture of the CMS and a few words. It opens by itself once, after
    someone creates an account, and can be watched again from Help or the account menu.
    UOL_TOUR.start({ name, onDone }) opens it; onDone runs when it is finished or closed.
-   Arrow keys move between steps and Esc closes it. With reduced motion, the pictures stand still. */
+   Arrow keys move between steps and Esc closes it. Pictures slide between steps and replay every few seconds;
+   finishing ends with a burst of confetti. With reduced motion, the pictures stand still and none of that runs. */
 (function () {
   'use strict';
 
@@ -24,13 +25,13 @@
       title: function (o) { return 'Welcome' + (o.name ? ', ' + o.name.split(' ')[0] : '') + '!'; },
       text: 'This is where you prototype leeds.ac.uk pages with the real University design system, so what you build looks exactly like the live site. Here is a two-minute look around.',
       scene: function () {
-        return win([
+        return h('div', 'ts-welcome', [h('b', 'ts-badge', null, 'L'), h('span', 'ts-spark ts-spark--a'), h('span', 'ts-spark ts-spark--b'), h('span', 'ts-spark ts-spark--c'), win([
           h('div', 'ts-mast', [h('b', 'ts-mast__logo'), h('span', 'ts-mast__nav', lines(3))]),
           h('div', 'ts-hero ts-in ts-d1'),
           h('div', 'ts-row ts-in ts-d2', [h('div', 'ts-card'), h('div', 'ts-card'), h('div', 'ts-card')]),
           h('div', 'ts-text ts-in ts-d3', lines(3)),
           h('div', 'ts-quote ts-in ts-d4', [h('b', null, null, '“'), h('span', null, lines(2))])
-        ], 'ts-win--welcome');
+        ], 'ts-win--welcome')]);
       }
     },
     {
@@ -146,45 +147,94 @@
   ];
 
   var open = null;
+  var LOOP_MS = 7500;                        // each picture plays again after this long
+  var CONFETTI = ['#c70000', '#910000', '#0e0c0c', '#ffd27a', '#156265', '#f3e3e3'];
+  function calm() { return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches); }
   function start(opts) {
     opts = opts || {};
     if (open) open.close(false);
-    var i = 0, done = false;
-    var stage = h('div', 'tour__stage');
+    var i = 0, done = false, loopTimer = null, shown = false;
+    var stage = h('div', 'tour__stage', [h('i', 'tour__blob tour__blob--a'), h('i', 'tour__blob tour__blob--b'), h('i', 'tour__blob tour__blob--c')]);
+    var progress = h('div', 'tour__progress', [h('i')]);
     var count = h('p', 'tour__count');
     var title = h('h2', 'tour__title'); title.id = 'tour-title';
     var text = h('p', 'tour__text');
+    var copy = h('div', 'tour__copy', [count, title, text]);
     var dots = h('div', 'tour__dots');
     var back = h('button', 'btn', null, 'Back'); back.type = 'button';
-    var next = h('button', 'btn btn--primary', null, 'Next'); next.type = 'button';
+    var next = h('button', 'btn btn--primary tour__next', null, 'Next'); next.type = 'button';
     var skip = h('button', 'tour__skip', null, 'Skip the tour'); skip.type = 'button';
     var closeX = h('button', 'tour__close', null, '✕'); closeX.type = 'button'; closeX.setAttribute('aria-label', 'Close the tour');
     STEPS.forEach(function (s, n) { var d = h('button', 'tour__dot'); d.type = 'button'; d.setAttribute('aria-label', 'Step ' + (n + 1)); d.onclick = function () { show(n); }; dots.appendChild(d); });
-    var card = h('div', 'tour__card', [closeX, stage, h('div', 'tour__body', [count, title, text, h('div', 'tour__foot', [dots, h('span', 'tour__spacer'), skip, back, next])])]);
+    var card = h('div', 'tour__card', [progress, closeX, stage, h('div', 'tour__body', [copy, h('div', 'tour__foot', [dots, h('span', 'tour__spacer'), skip, back, next])])]);
     card.setAttribute('role', 'dialog'); card.setAttribute('aria-modal', 'true'); card.setAttribute('aria-labelledby', 'tour-title');
     var overlay = h('div', 'tour', [card]);
     var before = document.activeElement;
+    /* the picture for step n, built fresh so its animation starts from the beginning */
+    function scene(n, cls) { return h('div', 'tour__scene tour__scene--' + n + (cls ? ' ' + cls : ''), [STEPS[n].scene()]); }
+    /* restart an element's entrance animation */
+    function replayIn(node) { node.classList.remove('is-in'); void node.offsetWidth; node.classList.add('is-in'); }
+    /* play the picture again every so often, with a short fade, while the step stays open */
+    function loop() {
+      clearTimeout(loopTimer);
+      if (calm()) return;
+      loopTimer = setTimeout(function () {
+        if (done) return;
+        var cur = stage.querySelector('.tour__scene:not(.is-leaving)'); if (!cur) return;
+        cur.classList.add('is-fading');
+        setTimeout(function () { if (done || !cur.parentNode) return; cur.replaceWith(scene(i, 'is-fresh')); loop(); }, 320);
+      }, LOOP_MS);
+    }
     function show(n) {
+      var from = i;
       i = Math.max(0, Math.min(STEPS.length - 1, n));
-      var s = STEPS[i];
-      stage.innerHTML = '';
-      // a fresh copy of the picture each time, so its animation starts from the beginning
-      var sc = h('div', 'tour__scene tour__scene--' + i, [s.scene()]);
-      stage.appendChild(sc);
+      var s = STEPS[i], dir = !shown ? '' : i > from ? 'from-right' : i < from ? 'from-left' : '';
+      // the old picture slides out the way we are going; the new one slides in from the other side
+      Array.prototype.forEach.call(stage.querySelectorAll('.tour__scene'), function (old) {
+        if (!dir || calm()) { old.remove(); return; }
+        old.classList.add('is-leaving', dir === 'from-right' ? 'to-left' : 'to-right');
+        setTimeout(function () { old.remove(); }, 420);
+      });
+      stage.appendChild(scene(i, dir && !calm() ? 'is-entering ' + dir : ''));
       count.textContent = 'Step ' + (i + 1) + ' of ' + STEPS.length;
       title.textContent = typeof s.title === 'function' ? s.title(opts) : s.title;
       text.textContent = s.text;
-      Array.prototype.forEach.call(dots.children, function (d, k) { d.classList.toggle('is-on', k === i); d.setAttribute('aria-current', k === i ? 'step' : 'false'); });
+      replayIn(copy);
+      progress.firstChild.style.width = ((i + 1) / STEPS.length * 100) + '%';
+      Array.prototype.forEach.call(dots.children, function (d, k) { d.classList.toggle('is-on', k === i); d.classList.toggle('is-done', k < i); d.setAttribute('aria-current', k === i ? 'step' : 'false'); });
       back.hidden = i === 0;
       next.textContent = i === STEPS.length - 1 ? 'Start using the CMS' : 'Next';
+      next.classList.toggle('tour__next--last', i === STEPS.length - 1);
       skip.hidden = i === STEPS.length - 1;
+      shown = true;
+      loop();
       next.focus();
+    }
+    /* a burst of confetti in Leeds colours from the button, then the tour closes */
+    function celebrate(then) {
+      if (calm()) { then(); return; }
+      var r = next.getBoundingClientRect(), box = h('div', 'tour__confetti');
+      box.style.left = (r.left + r.width / 2) + 'px'; box.style.top = (r.top + r.height / 2) + 'px';
+      for (var k = 0; k < 70; k++) {
+        var bit = h('i'), ang = Math.random() * Math.PI * 2, dist = 120 + Math.random() * 260;
+        bit.style.setProperty('--x', Math.round(Math.cos(ang) * dist) + 'px');
+        bit.style.setProperty('--y', Math.round(Math.sin(ang) * dist * 0.7 - 120) + 'px');
+        bit.style.setProperty('--r', Math.round(Math.random() * 720 - 360) + 'deg');
+        bit.style.setProperty('--d', (Math.random() * 0.15).toFixed(2) + 's');
+        bit.style.background = CONFETTI[k % CONFETTI.length];
+        if (k % 3 === 0) bit.style.borderRadius = '50%';
+        box.appendChild(bit);
+      }
+      overlay.appendChild(box);
+      card.classList.add('is-celebrating');
+      setTimeout(then, 950);
     }
     function close(finished) {
       if (done) return; done = true;
+      clearTimeout(loopTimer);
       document.removeEventListener('keydown', onKey, true);
       overlay.classList.add('is-closing');
-      setTimeout(function () { overlay.remove(); }, 180);
+      setTimeout(function () { overlay.remove(); }, 260);
       open = null;
       if (before && before.focus) try { before.focus(); } catch (e) {}
       if (opts.onDone) opts.onDone(!!finished);
@@ -192,7 +242,7 @@
     function onKey(e) {
       if (e.key === 'Escape') { e.preventDefault(); close(false); }
       else if (e.key === 'ArrowRight') { e.preventDefault(); if (i < STEPS.length - 1) show(i + 1); }
-      else if (e.key === 'ArrowLeft') { e.preventDefault(); show(i - 1); }
+      else if (e.key === 'ArrowLeft') { e.preventDefault(); if (i > 0) show(i - 1); }
       else if (e.key === 'Tab') {
         // keep the focus inside the tour
         var f = Array.prototype.filter.call(card.querySelectorAll('button'), function (b) { return !b.hidden && b.offsetParent !== null; });
@@ -201,7 +251,7 @@
         else if (!e.shiftKey && document.activeElement === f[f.length - 1]) { e.preventDefault(); f[0].focus(); }
       }
     }
-    next.onclick = function () { if (i === STEPS.length - 1) close(true); else show(i + 1); };
+    next.onclick = function () { if (i === STEPS.length - 1) { next.disabled = true; celebrate(function () { close(true); }); } else show(i + 1); };
     back.onclick = function () { show(i - 1); };
     skip.onclick = function () { close(false); };
     closeX.onclick = function () { close(false); };
