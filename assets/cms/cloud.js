@@ -436,7 +436,8 @@
       return rpc('update_share_link', { p_token: token, p_data: data }).then(function () { return uploadShareImages(token, data, onProgress); });
     },
     remove: function (token) { return removeShareImages(token).then(function () { return rpc('delete_share_link', { p_token: token }); }); },
-    setComments: function (token, allow) { return rpc('set_share_link_comments', { p_token: token, p_allow: !!allow }); }
+    setComments: function (token, allow) { return rpc('set_share_link_comments', { p_token: token, p_allow: !!allow }); },
+    setApprovals: function (token, allow) { return rpc('set_share_link_approvals', { p_token: token, p_allow: !!allow }); }
   };
 
   /* ---------------------------------------------------------------- live updates (Supabase Realtime)

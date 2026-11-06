@@ -291,6 +291,11 @@ create table if not exists public.page_signoffs (
   at           timestamptz not null default now()
 );
 create index if not exists page_signoffs_page_idx on public.page_signoffs (project_id, page_id, at desc);
+-- approvals given through a review link carry the reviewer's name (and role, if given) instead of an account
+alter table public.page_signoffs add column if not exists guest_name text check (guest_name is null or char_length(guest_name) between 1 and 80);
+alter table public.page_signoffs add column if not exists guest_role text check (guest_role is null or char_length(guest_role) <= 120);
+alter table public.page_signoffs add column if not exists guest_via text;
+alter table public.page_signoffs add column if not exists share_token text;
 
 alter table public.page_comments enable row level security;
 alter table public.page_signoffs enable row level security;
@@ -368,10 +373,11 @@ begin
     values (p_project, p_page, p_status, nullif(trim(coalesce(p_note, '')), ''), p_hash, auth.uid());
 end $$;
 
-create or replace function public.page_signoff_history(p_project uuid, p_page text)
-returns table (id bigint, status text, note text, content_hash text, by_email text, at timestamptz)
+drop function if exists public.page_signoff_history(uuid, text);
+create function public.page_signoff_history(p_project uuid, p_page text)
+returns table (id bigint, status text, note text, content_hash text, by_email text, at timestamptz, guest_name text, guest_role text, guest_via text)
 language sql stable security definer set search_path = public, auth as $$
-  select s.id, s.status, s.note, s.content_hash, u.email::text, s.at
+  select s.id, s.status, s.note, s.content_hash, u.email::text, s.at, s.guest_name, s.guest_role, s.guest_via
     from public.page_signoffs s left join auth.users u on u.id = s.by_user
    where s.project_id = p_project and s.page_id = p_page and public.can_read_project(p_project)
    order by s.at desc, s.id desc;
@@ -382,14 +388,14 @@ create or replace function public.page_review_summary(p_project uuid)
 returns table (page_id text, status text, by_email text, at timestamptz, content_hash text, open_comments integer, comments integer)
 language sql stable security definer set search_path = public, auth as $$
   with latest as (
-    select distinct on (s.page_id) s.page_id, s.status, s.by_user, s.at, s.content_hash
+    select distinct on (s.page_id) s.page_id, s.status, s.by_user, s.at, s.content_hash, s.guest_name
       from public.page_signoffs s where s.project_id = p_project
      order by s.page_id, s.at desc, s.id desc
   ), counts as (
     select c.page_id, count(*) filter (where c.resolved_at is null)::integer as open_comments, count(*)::integer as comments
       from public.page_comments c where c.project_id = p_project group by c.page_id
   )
-  select coalesce(l.page_id, n.page_id), l.status, u.email::text, l.at, l.content_hash, coalesce(n.open_comments, 0), coalesce(n.comments, 0)
+  select coalesce(l.page_id, n.page_id), l.status, coalesce(u.email::text, l.guest_name || ' (reviewer)'), l.at, l.content_hash, coalesce(n.open_comments, 0), coalesce(n.comments, 0)
     from latest l full join counts n on n.page_id = l.page_id
     left join auth.users u on u.id = l.by_user
    where public.can_read_project(p_project);
@@ -464,12 +470,18 @@ create table if not exists public.share_links (
 );
 create index if not exists share_links_project_idx on public.share_links (project_id);
 alter table public.share_links add column if not exists allow_comments boolean not null default true;
+-- approvals through a link are off unless the link was made with them, or they are switched on later
+alter table public.share_links add column if not exists allow_approvals boolean not null default false;
 alter table public.share_links enable row level security;
 revoke all on public.share_links from anon, authenticated;
 -- deleting a link keeps the comments reviewers left through it
 do $$ begin
   if not exists (select 1 from pg_constraint where conname = 'page_comments_share_token_fkey') then
     alter table public.page_comments add constraint page_comments_share_token_fkey
+      foreign key (share_token) references public.share_links (token) on delete set null;
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'page_signoffs_share_token_fkey') then
+    alter table public.page_signoffs add constraint page_signoffs_share_token_fkey
       foreign key (share_token) references public.share_links (token) on delete set null;
   end if;
 end $$;
@@ -511,14 +523,24 @@ begin
   update public.share_links set allow_comments = p_allow where token = p_token;
 end $$;
 
+create or replace function public.set_share_link_approvals(p_token text, p_allow boolean)
+returns void language plpgsql security definer set search_path = public as $$
+declare pid uuid;
+begin
+  select project_id into pid from public.share_links where token = p_token;
+  if pid is null or not public.can_edit_project(pid) then raise exception 'Review link not found'; end if;
+  update public.share_links set allow_approvals = p_allow where token = p_token;
+end $$;
+
 -- the links of a project, for its owner and editors (without the copies themselves)
 drop function if exists public.share_link_list(uuid);
 create function public.share_link_list(p_project uuid)
 returns table (token text, name text, scope text, created_at timestamptz, updated_at timestamptz, created_by_email text, page_count integer,
-               allow_comments boolean, guest_comments integer)
+               allow_comments boolean, guest_comments integer, allow_approvals boolean, guest_signoffs integer)
 language sql stable security definer set search_path = public, auth as $$
   select s.token, s.name, s.scope, s.created_at, s.updated_at, u.email::text, coalesce(jsonb_array_length(s.data -> 'pages'), 0),
-         s.allow_comments, (select count(*)::integer from public.page_comments c where c.share_token = s.token)
+         s.allow_comments, (select count(*)::integer from public.page_comments c where c.share_token = s.token),
+         s.allow_approvals, (select count(*)::integer from public.page_signoffs o where o.share_token = s.token)
     from public.share_links s left join auth.users u on u.id = s.created_by
    where s.project_id = p_project and public.can_edit_project(p_project)
    order by s.created_at desc;
@@ -527,9 +549,9 @@ $$;
 -- what the review page shows; callable without signing in, but only with the full token
 drop function if exists public.get_shared_project(text);
 create function public.get_shared_project(p_token text)
-returns table (name text, scope text, data jsonb, updated_at timestamptz, allow_comments boolean)
+returns table (name text, scope text, data jsonb, updated_at timestamptz, allow_comments boolean, allow_approvals boolean)
 language sql stable security definer set search_path = public as $$
-  select s.name, s.scope, s.data, s.updated_at, s.allow_comments from public.share_links s where s.token = p_token and length(p_token) = 64;
+  select s.name, s.scope, s.data, s.updated_at, s.allow_comments, s.allow_approvals from public.share_links s where s.token = p_token and length(p_token) = 64;
 $$;
 
 -- reviewers without an account comment through the link, with their name; they see only comments made through it
@@ -563,13 +585,51 @@ language sql stable security definer set search_path = public as $$
    order by c.created_at;
 $$;
 
+-- stakeholders without an account approve or ask for changes through the link, when it allows that. The approval is of
+-- the page as the link shows it: its fingerprint comes from the link's copy, so the CMS can tell when the page was
+-- edited afterwards. Reviewers see only the sign-off steps made through the same link.
+create or replace function public.add_guest_signoff(p_token text, p_page text, p_status text, p_name text, p_role text, p_note text)
+returns void language plpgsql security definer set search_path = public as $$
+declare s public.share_links; h text;
+begin
+  select * into s from public.share_links where token = p_token and length(p_token) = 64;
+  if s.token is null then raise exception 'This review link no longer works'; end if;
+  if not s.allow_approvals then raise exception 'Approvals are turned off for this review link'; end if;
+  if p_status not in ('approved', 'changes_requested') then raise exception 'Choose approve or ask for changes'; end if;
+  select e ->> 'hash' into h from jsonb_array_elements(coalesce(s.data -> 'pages', '[]'::jsonb)) e where e ->> 'id' = p_page limit 1;
+  if not exists (select 1 from jsonb_array_elements(coalesce(s.data -> 'pages', '[]'::jsonb)) e where e ->> 'id' = p_page) then
+    raise exception 'That page is not part of this review copy';
+  end if;
+  if coalesce(trim(p_name), '') = '' then raise exception 'Add your name so the team knows who signed off'; end if;
+  if p_status = 'changes_requested' and coalesce(trim(p_note), '') = '' then raise exception 'Say what needs to change'; end if;
+  if char_length(coalesce(p_note, '')) > 2000 then raise exception 'Keep the note to 2000 characters'; end if;
+  if (select count(*) from public.page_signoffs where share_token = p_token and at > now() - interval '1 hour') >= 20 then
+    raise exception 'Too many sign-offs through this link in the last hour. Try again later.';
+  end if;
+  insert into public.page_signoffs (project_id, page_id, status, note, content_hash, by_user, guest_name, guest_role, guest_via, share_token)
+    values (s.project_id, p_page, p_status, nullif(trim(coalesce(p_note, '')), ''), h, null,
+            left(trim(p_name), 80), nullif(left(trim(coalesce(p_role, '')), 120), ''), s.name, p_token);
+end $$;
+
+create or replace function public.guest_signoff_list(p_token text)
+returns table (page_id text, status text, guest_name text, guest_role text, note text, at timestamptz)
+language sql stable security definer set search_path = public as $$
+  select o.page_id, o.status, o.guest_name, o.guest_role, o.note, o.at
+    from public.page_signoffs o join public.share_links s on s.token = o.share_token
+   where o.share_token = p_token and length(p_token) = 64 and s.allow_approvals
+   order by o.at desc;
+$$;
+
 revoke execute on function public.create_share_link(uuid, text, text, jsonb), public.update_share_link(text, jsonb),
   public.delete_share_link(text), public.share_link_list(uuid), public.set_share_link_comments(text, boolean),
-  public.get_shared_project(text), public.add_guest_comment(text, text, text, text, text, text), public.guest_comment_list(text) from public, anon;
+  public.set_share_link_approvals(text, boolean), public.get_shared_project(text),
+  public.add_guest_comment(text, text, text, text, text, text), public.guest_comment_list(text),
+  public.add_guest_signoff(text, text, text, text, text, text), public.guest_signoff_list(text) from public, anon;
 grant execute on function public.create_share_link(uuid, text, text, jsonb), public.update_share_link(text, jsonb),
-  public.delete_share_link(text), public.share_link_list(uuid), public.set_share_link_comments(text, boolean) to authenticated;
+  public.delete_share_link(text), public.share_link_list(uuid), public.set_share_link_comments(text, boolean),
+  public.set_share_link_approvals(text, boolean) to authenticated;
 grant execute on function public.get_shared_project(text), public.add_guest_comment(text, text, text, text, text, text),
-  public.guest_comment_list(text) to anon, authenticated;
+  public.guest_comment_list(text), public.add_guest_signoff(text, text, text, text, text, text), public.guest_signoff_list(text) to anon, authenticated;
 
 -- images for review links: "<token>/<image id>" in a public bucket; only the project's editors can add or remove them
 create or replace function public.can_edit_share_media(object_name text)
@@ -753,7 +813,9 @@ begin
   if not exists (select 1 from public.notify_settings where id = 1 and enabled) or new.status = 'not_started' then return null; end if;
   select name into proj from public.projects where id = new.project_id;
   title := public.notify_page_title(new.project_id, new.page_id);
-  select email into actor from auth.users where id = new.by_user;
+  if new.guest_name is not null then
+    actor := new.guest_name || coalesce(', ' || new.guest_role, '') || ' (reviewer, through the link "' || coalesce(new.guest_via, 'review link') || '")';
+  else select email into actor from auth.users where id = new.by_user; end if;
   verb := case new.status when 'in_review' then 'sent for review' when 'approved' then 'approved' else 'sent back with changes requested' end;
   for r in select * from public.notify_recipients(new.project_id, new.by_user, 'signoff') loop
     perform public.notify_send(r.email, '[' || proj || '] "' || title || '" ' || verb,
