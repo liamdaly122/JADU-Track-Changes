@@ -128,6 +128,9 @@ function compare(ref, other, ids, labels) {
   let failed = false;
   try {
     const cms = await browser.newPage();
+    // run the CMS on its own (no cloud): no sign-in, and nothing reaches a real Supabase project
+    await cms.route('**/assets/cms/cloud-config.js', (r) => r.fulfill({ contentType: 'application/javascript', body: 'window.UOL_CLOUD_CONFIG = { url: "", anonKey: "" };' }));
+    await cms.route(/supabase\.co/, (r) => r.abort());
     await cms.goto(base + '/index.html#pages');
     await cms.waitForFunction(() => window.UOL_RENDER && window.UOL_BLOCKS && window.UOL_STORE && window.UOL_STORE.data);
     const pages = await cms.evaluate(buildPages);

@@ -94,6 +94,8 @@
     link: 'M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7a5 5 0 0 0-5 5 5 5 0 0 0 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1M8 13h8v-2H8v2m9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4a5 5 0 0 0 5-5 5 5 0 0 0-5-5z',
     download: 'M5 20h14v-2H5m14-9h-4V3H9v6H5l7 7 7-7z',
     cloud: 'M19.35 10.04A7.49 7.49 0 0 0 12 4C9.11 4 6.6 5.64 5.35 8.04A5.994 5.994 0 0 0 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96M19 18H6c-2.21 0-4-1.79-4-4 0-2.05 1.53-3.76 3.56-3.97l1.07-.11.5-.95A5.469 5.469 0 0 1 12 6c2.62 0 4.88 1.86 5.39 4.43l.3 1.5 1.53.11A2.98 2.98 0 0 1 22 15c0 1.65-1.35 3-3 3z',
+    projects: '<path d="M3 7.5A1.5 1.5 0 0 1 4.5 6H9l2 2h8.5A1.5 1.5 0 0 1 21 9.5v8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z"/>',
+    person: '<circle cx="12" cy="8" r="4"/><path d="M4 20c1.2-3.6 4.3-5.5 8-5.5s6.8 1.9 8 5.5"/>',
     share: 'M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9a3 3 0 0 0-3 3 3 3 0 0 0 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.15c-.05.21-.08.43-.08.66 0 1.61 1.31 2.91 2.92 2.91s2.92-1.3 2.92-2.91A2.92 2.92 0 0 0 18 16.08z'
   };
   function icon(name, size) {
@@ -105,18 +107,35 @@
     return t.content.firstChild;
   }
   function iconBtn(name, title, onClick, extra) { return el('button', Object.assign({ type: 'button', class: 'ibtn', title: title, 'aria-label': title, onclick: onClick }, extra || {}), [icon(name)]); }
-  // the last two items (Settings, Help) sit at the foot of the rail
-  var RAIL = [['pages', 'Pages', 'pages'], ['media', 'Media', 'media'], ['import', 'Import', 'import'], ['export', 'Save and export', 'export'], ['cloud', 'Cloud', 'cloud'], ['settings', 'Settings', 'settings'], ['help', 'Help', 'help']];
+  // the last two items (Settings, Help) sit at the foot of the rail. With cloud saving, Projects comes first and
+  // Sharing replaces Cloud; without it (opened from a folder, offline) the CMS works on one project in this browser.
+  var RAIL_LOCAL = [['pages', 'Pages', 'pages'], ['media', 'Media', 'media'], ['import', 'Import', 'import'], ['export', 'Save and export', 'export'], ['cloud', 'Cloud', 'cloud'], ['settings', 'Settings', 'settings'], ['help', 'Help', 'help']];
+  var RAIL_CLOUD = [['projects', 'Projects', 'projects'], ['pages', 'Pages', 'pages'], ['media', 'Media', 'media'], ['import', 'Import', 'import'], ['export', 'Save and export', 'export'], ['sharing', 'Sharing', 'share'], ['settings', 'Settings', 'settings'], ['help', 'Help', 'help']];
   // screens reached from Settings keep Settings highlighted in the rail
   var SETTINGS_VIEWS = { site: 1, theme: 1, library: 1 };
+  // screens that need a project open
+  var NO_PROJECT_VIEWS = { projects: 1, help: 1 };
+  function cloudMode() { return App.mode === 'cloud'; }
   function buildRail() {
-    var rail = document.getElementById('rail');
-    RAIL.forEach(function (r, i) {
-      if (i === RAIL.length - 2) rail.appendChild(el('span', { class: 'rail__spacer' }));
+    var rail = document.getElementById('rail'), C = window.UOL_CLOUD;
+    Array.prototype.slice.call(rail.querySelectorAll('.rail__item, .rail__spacer, .rail__account')).forEach(function (n) { n.remove(); });
+    var logo = rail.querySelector('.rail__logo'); if (logo) logo.setAttribute('href', cloudMode() ? '#projects' : '#pages');
+    var items = cloudMode() ? RAIL_CLOUD : RAIL_LOCAL;
+    items.forEach(function (r, i) {
+      if (i === items.length - 2) rail.appendChild(el('span', { class: 'rail__spacer' }));
       rail.appendChild(el('a', { class: 'rail__item', href: '#' + r[0], title: r[1], 'data-view': r[0], 'aria-label': r[1] }, [icon(r[2], 22), el('span', { class: 'rail__label', text: r[1] })]));
     });
+    if (cloudMode() && C && C.user()) rail.appendChild(accountButton());
   }
-  function setRailActive(view) { document.querySelectorAll('.rail__item').forEach(function (a) { a.classList.toggle('is-active', a.getAttribute('data-view') === (view === 'edit' ? 'pages' : SETTINGS_VIEWS[view] ? 'settings' : view)); }); }
+  function setRailActive(view) {
+    var noProject = cloudMode() && !Store.data;
+    document.querySelectorAll('.rail__item').forEach(function (a) {
+      var v = a.getAttribute('data-view');
+      a.classList.toggle('is-active', v === (view === 'edit' ? 'pages' : SETTINGS_VIEWS[view] ? 'settings' : view));
+      a.classList.toggle('is-off', noProject && !NO_PROJECT_VIEWS[v]);
+      if (noProject && !NO_PROJECT_VIEWS[v]) a.title = a.getAttribute('aria-label') + ' (open a project first)'; else a.title = a.getAttribute('aria-label');
+    });
+  }
   /* the top bar is rebuilt by every screen: a title (or the editor's controls) on the left, the save state and project actions on the right */
   function setTopbar(leftNodes, rightNodes) {
     var tb = document.getElementById('topbar');
@@ -130,7 +149,8 @@
   function cloudChip() {
     var C = window.UOL_CLOUD;
     if (!C || !(C.configured() || C.link())) return null;
-    var a = el('a', { id: 'cloud-status', class: 'cloud-chip', href: '#cloud' });
+    if (cloudMode() && !C.link()) return null;
+    var a = el('a', { id: 'cloud-status', class: 'cloud-chip', href: cloudMode() ? '#sharing' : '#cloud' });
     renderCloudChip(a);
     return a;
   }
@@ -142,13 +162,15 @@
     a.innerHTML = '';
     a.appendChild(icon('cloud', 16));
     a.appendChild(el('span', { text: s.link ? (CLOUD_LABEL[kind] || 'Cloud') : (s.user ? 'Not in the cloud' : 'Cloud: sign in') }));
-    a.title = s.link ? ('Cloud project "' + s.link.name + '"' + (s.status.message ? ': ' + s.status.message : '')) : 'This project is only in this browser. Open the Cloud screen to save it online and share it.';
+    a.title = s.link ? ('"' + s.link.name + '"' + (s.status.message ? ': ' + s.status.message : '')) : 'This project is only in this browser. Open the Cloud screen to save it online and share it.';
   }
   function projectActions() {
+    if (cloudMode() && !Store.data) return [];
     return [
+      cloudMode() ? presenceStack() : null,
       cloudChip(),
       el('span', { id: 'save-status', class: 'save-status', 'aria-live': 'polite' }),
-      iconBtn('open', 'Open a project file', openProjectFile),
+      iconBtn('open', cloudMode() ? 'New project from a project file' : 'Open a project file', openProjectFile),
       iconBtn('save', 'Save the project to a file (Ctrl+Shift+S)', function () { saveProjectToFile(false); })
     ];
   }
@@ -179,15 +201,20 @@
     if (Store.save()) { App.dirty = false; App.lastSaved = new Date(); updateSaveStatus(); writeFolderSoon(); storageGuard(); }
     else {
       updateSaveStatus();
-      showBanner('warn', ['Browser storage is full, so the latest change is not saved. Free up space, then keep editing.'], [{ label: 'Free up space', primary: true, onClick: freeSpaceDialog }]);
+      showBanner('warn', ['The latest change could not be saved in this browser. Free up space, then keep editing.'], [{ label: 'Free up space', primary: true, onClick: freeSpaceDialog }]);
     }
   };
   var saveSoon = debounce(saveNow, 500);
-  function markDirty() { App.dirty = true; updateSaveStatus(); saveSoon(); }
+  var editingTimer = null;
+  function markDirty() {
+    App.dirty = true; updateSaveStatus(); saveSoon();
+    if (cloudMode() && App.page) { window.UOL_CLOUD.presence.set({ editing: true }); clearTimeout(editingTimer); editingTimer = setTimeout(function () { window.UOL_CLOUD.presence.set({ editing: false }); }, 8000); }
+  }
   function updateSaveStatus() {
     var s = document.getElementById('save-status'); if (!s) return;
-    var where = App.folderLinked ? 'folder "' + M.folderName() + '"' : App.fileHandle ? 'file ' + App.fileHandle.name : 'this browser only';
-    if (Store.lastError) { s.innerHTML = '<i></i>Not saved: storage full'; s.className = 'save-status save-status--error'; s.title = 'Browser storage is full'; return; }
+    var cl = window.UOL_CLOUD && window.UOL_CLOUD.link();
+    var where = cl ? 'this browser, then the cloud' : App.folderLinked ? 'folder "' + M.folderName() + '"' : App.fileHandle ? 'file ' + App.fileHandle.name : 'this browser only';
+    if (Store.lastError) { s.innerHTML = '<i></i>Not saved'; s.className = 'save-status save-status--error'; s.title = Store.lastError.message; return; }
     s.innerHTML = '<i></i>' + (App.dirty ? 'Saving…' : 'Saved');
     s.className = 'save-status' + (App.dirty ? ' save-status--dirty' : '');
     s.title = (App.lastSaved ? 'Last saved ' + App.lastSaved.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + ' to ' : 'Saving to ') + where;
@@ -236,7 +263,7 @@
       }
     });
   }
-  function latestChange() { var t = ''; Store.data.pages.forEach(function (p) { if ((p.updatedAt || '') > t) t = p.updatedAt; }); return t; }
+  function latestChange() { var t = ''; if (!Store.data) return t; Store.data.pages.forEach(function (p) { if ((p.updatedAt || '') > t) t = p.updatedAt; }); return t; }
   function unlinkFolder() { M.setFolder(null); App.folderLinked = false; M.kvSet('projectFolder', null); updateSaveStatus(); toast('Folder unlinked. Work stays in this browser only.', 'info', 4000); }
 
   /* ---------- single project file (File System Access API with download fallback) ---------- */
@@ -252,6 +279,7 @@
     return X.exportProjectJson(Store).then(function () { try { localStorage.setItem('leeds-cms:lastBackup', new Date().toISOString()); } catch (e) {} toast('Project downloaded as JSON', 'success'); });
   }
   function openProjectFile() {
+    if (cloudMode()) { newProjectFromFile(); return; }
     function load(text, name) {
       beforeReplaceAll('Open ' + name).then(function (ok) { if (ok) doLoad(text, name); });
     }
@@ -271,6 +299,7 @@
   function beforeReplaceAll(what) {
     var C = window.UOL_CLOUD, l = C && C.link();
     if (!l || !C.canEdit()) return Promise.resolve(true);
+    if (cloudMode()) return UI.confirm(what, 'This replaces "' + l.name + '" for everyone it is shared with. Each page keeps hourly copies, so this can be undone.', 'Replace', true);
     return new Promise(function (resolve) {
       var answered = false;
       UI.modal({
@@ -412,8 +441,8 @@
     }).then(function (ok) { if (ok) { try { localStorage.removeItem(SNAP_KEY); } catch (e) {} } return ok ? old.length : 0; });
   }
 
-  /* ---------- storage guard: the working copy must fit in about 5 MB of localStorage ---------- */
-  function fmtSize(chars) { return chars >= 995000 ? (chars / 1e6).toFixed(1) + ' MB' : Math.max(1, Math.round(chars / 1000)) + ' KB'; }
+  /* ---------- storage guard: what the open project takes in the browser's database ---------- */
+  function fmtSize(chars) { return chars >= 995e6 ? (chars / 1e9).toFixed(1) + ' GB' : chars >= 995000 ? (chars / 1e6).toFixed(1) + ' MB' : Math.max(1, Math.round(chars / 1000)) + ' KB'; }
   var METER_PARTS = [['content', 'Pages and site settings'], ['versions', 'Saved page versions'], ['originals', 'Originals kept for Changes'], ['other', 'Other settings']];
   function storageMeter(r) {
     r = r || Store.storageReport();
@@ -421,7 +450,7 @@
     var bar = el('div', { class: 'meter meter--' + r.level, role: 'img', 'aria-label': 'Browser storage ' + pct + '% full' });
     METER_PARTS.forEach(function (m) { if (r[m[0]] > 0) bar.appendChild(el('span', { class: 'meter__seg meter__seg--' + m[0], style: 'width:' + Math.min(100, r[m[0]] / r.limit * 100).toFixed(2) + '%', title: m[1] + ': ' + fmtSize(r[m[0]]) })); });
     return el('div', { class: 'meter-wrap' }, [
-      el('div', { class: 'meter__head' }, [el('strong', { text: fmtSize(r.total) + ' of about ' + fmtSize(r.limit) + ' used (' + pct + '%)' }), r.level !== 'ok' ? el('span', { class: 'count-pill count-pill--' + (r.level === 'danger' ? 'error' : 'warn'), text: r.level === 'danger' ? 'Nearly full' : 'Filling up' }) : null]),
+      el('div', { class: 'meter__head' }, [el('strong', { text: fmtSize(r.total) + ' used by this project, of ' + fmtSize(r.limit) + ' this browser allows (' + (pct < 1 ? 'under 1' : pct) + '%)' }), r.level !== 'ok' ? el('span', { class: 'count-pill count-pill--' + (r.level === 'danger' ? 'error' : 'warn'), text: r.level === 'danger' ? 'Nearly full' : 'Filling up' }) : null]),
       bar,
       el('div', { class: 'meter__legend' }, METER_PARTS.map(function (m) { return el('span', { class: 'meter__key' }, [el('i', { class: 'meter__dot meter__seg--' + m[0] }), m[1] + ': ' + fmtSize(r[m[0]])]); }))
     ]);
@@ -434,7 +463,7 @@
     var r = Store.storageReport();
     if (r.level === 'ok' || guardShown[r.level]) return;
     guardShown[r.level] = true;
-    showBanner('warn', ['Browser storage is ' + Math.round(r.share * 100) + '% full. ' + (r.level === 'danger' ? 'When it is full, changes stop saving.' : 'Free up some space before it fills.')], [{ label: 'Free up space', primary: true, onClick: freeSpaceDialog }, { label: 'Later' }]);
+    showBanner('warn', ['This browser\'s storage for the CMS is ' + Math.round(r.share * 100) + '% full. ' + (r.level === 'danger' ? 'When it is full, changes stop saving.' : 'Free up some space before it fills.')], [{ label: 'Free up space', primary: true, onClick: freeSpaceDialog }, { label: 'Later' }]);
   }
   /* pages that are finished: approved and unchanged since, or every change done in Jadu */
   function handedOver(p) {
@@ -449,7 +478,7 @@
       var r = Store.storageReport();
       body.innerHTML = '';
       body.appendChild(storageMeter(r));
-      body.appendChild(el('p', { class: 'small', text: 'The working copy of the project (pages, site settings, page versions and the originals kept for Changes) lives in about 5 MB of browser storage. Images and snapshots are kept separately and have far more room.' }));
+      body.appendChild(el('p', { class: 'small', text: 'The working copy of the project (pages, site settings, page versions and the originals kept for Changes) is kept in this browser\'s database, which has plenty of room for most projects. Removing old versions and originals keeps a large project quick to load and sync.' }));
       // saved versions
       var count = r.pages.reduce(function (n, p) { return n + p.versionCount; }, 0);
       var keep = el('select', { class: 'input input--sm', 'aria-label': 'Versions to keep per page' }, [['5', 'the latest 5'], ['3', 'the latest 3'], ['1', 'the latest 1'], ['0', 'none']].map(function (o) { return option(o[0], o[1]); }));
@@ -526,6 +555,7 @@
       Preview.iframe = next; Preview.ready = true;
       next.classList.remove('preview__frame--pending');
       if (old && old !== next) old.remove();
+      if (cloudMode()) renderPresence();
     }, 60);
   }
   var reloadPreviewSoon = debounce(function () { reloadPreview(true); }, 700);
@@ -549,7 +579,9 @@
     if (d.uolcms === 'import' && (typeof d.html === 'string' || Array.isArray(d.pages))) {
       if (e.source && e.source.postMessage) { try { e.source.postMessage({ uolcms: 'import-ack' }, '*'); } catch (err) {} }
       var msg = { kind: String(d.kind || 'page'), html: typeof d.html === 'string' ? d.html : '', url: String(d.url || ''), title: String(d.title || ''), pages: Array.isArray(d.pages) ? d.pages : null, failed: Array.isArray(d.failed) ? d.failed : [], assets: d.assets && typeof d.assets === 'object' ? d.assets : null };
-      if (App.view === 'import' && App.onGrabberImport) App.onGrabberImport(msg); else { App.pendingGrab = msg; go('#import'); }
+      if (App.view === 'import' && App.onGrabberImport) App.onGrabberImport(msg);
+      else if (cloudMode() && !Store.data) { App.pendingGrab = msg; toast('Page received. ' + (window.UOL_CLOUD.user() ? 'Open the project it is for' : 'Sign in and open the project it is for') + ', and it goes straight into Import.', 'info', 8000); }
+      else { App.pendingGrab = msg; go('#import'); }
       return;
     }
     var fromPending = Preview.pending && e.source === Preview.pending.contentWindow;
@@ -712,8 +744,23 @@
   /* ================= routing ================= */
   function go(hash) { if (location.hash === hash) route(); else location.hash = hash; }
   function route() {
-    var h = location.hash.replace(/^#\/?/, '') || 'pages';
+    var C = window.UOL_CLOUD;
+    if (!App.mode) return; // still starting up
+    // a link from a sign-up or password email opened in a tab that already had the CMS: start again to read it
+    if (cloudMode() && /(^|[#&])(access_token|error)=/.test(location.hash)) { location.reload(); return; }
+    var h = location.hash.replace(/^#\/?/, '') || (cloudMode() && !Store.data ? 'projects' : 'pages');
     var parts = h.split('/');
+    if (cloudMode()) {
+      // nothing but the sign-in screens until someone is signed in
+      var signedIn = !!C.user();
+      document.body.classList.toggle('is-auth', !signedIn);
+      if (!signedIn) { App.view = 'auth'; App.page = null; renderAuth(); return; }
+      if (parts[0] === 'open') { openFromLink(parts[1], parts[2]); return; }
+      if (parts[0] === 'cloud') parts[0] = 'sharing';
+      if (!Store.data && !NO_PROJECT_VIEWS[parts[0]]) { go('#projects'); return; }
+      // a page the grabber sent before a project was open
+      if (Store.data && App.pendingGrab && parts[0] !== 'import') { go('#import'); return; }
+    }
     App.view = parts[0];
     var root = document.getElementById('app');
     root.innerHTML = '';
@@ -730,10 +777,13 @@
       case 'export': App.page = null; screenTopbar('Save and export'); root.appendChild(exportView()); break;
       case 'help': App.page = null; screenTopbar('Help'); root.appendChild(helpView()); break;
       case 'cloud': App.page = null; screenTopbar('Cloud'); root.appendChild(cloudView()); break;
-      default: App.view = 'pages'; App.page = null; screenTopbar('Pages'); root.appendChild(pagesView());
+      case 'projects': App.page = null; screenTopbar('Projects'); root.appendChild(projectsView()); break;
+      case 'sharing': App.page = null; screenTopbar('Sharing'); root.appendChild(sharingView()); break;
+      default: App.view = 'pages'; App.page = null; screenTopbar(cloudMode() && C.link() ? C.link().name || 'Pages' : 'Pages'); root.appendChild(pagesView());
     }
     setRailActive(App.view);
     root.scrollTo(0, 0);
+    if (cloudMode()) { C.presence.set({ page: App.view === 'edit' && App.page ? App.page.id : null, block: App.view === 'edit' ? App.selectedBlock || null : null, editing: false }); renderPresence(); }
   }
 
   /* ================= pages view (grouped by section) ================= */
@@ -752,7 +802,7 @@
     var status = p.status || 'draft';
     return el('tr', {}, [
       el('td', { class: 'ptable__num' }, [numbered ? String(numbered) : '']),
-      el('td', { class: 'ptable__title' }, [el('a', { href: '#edit/' + p.id, text: p.title }), el('span', { class: 'ptable__sub', text: (p.blocks || []).length + ' block' + ((p.blocks || []).length === 1 ? '' : 's') })]),
+      el('td', { class: 'ptable__title' }, [el('span', { class: 'ptable__titleline' }, [el('a', { href: '#edit/' + p.id, text: p.title }), el('span', { class: 'page-people', 'data-people': p.id })]), el('span', { class: 'ptable__sub', text: (p.blocks || []).length + ' block' + ((p.blocks || []).length === 1 ? '' : 's') })]),
       el('td', { class: 'ptable__path ptable__hide-sm', text: '/' + p.slug }),
       el('td', {}, [el('span', { class: 'tag tag--' + p.template, text: p.template })]),
       el('td', { class: 'ptable__status', 'data-signoff': p.id }, [el('span', { class: 'status status--' + status, text: status })]),
@@ -864,7 +914,7 @@
     render();
     function setAll(collapsed) { Store.data.sections.forEach(function (s) { ui.collapsed[s.id] = collapsed; }); ui.collapsed.__loose = collapsed; savePagesUi(ui); render(); }
     return el('div', { class: 'page-wrap' }, [
-      el('div', { class: 'page-head' }, [el('div', { class: 'page-head__actions' }, [el('button', { class: 'btn btn--primary', type: 'button', onclick: function () { newPageDialog(); } }, ['+ New page']), el('button', { class: 'btn', type: 'button', onclick: function () { UI.prompt('New section', 'Section title (for example "Undergraduate")', '', 'Create').then(function (t) { if (t) { Store.createSection(t); render(); } }); } }, ['+ New section']), el('a', { class: 'btn', href: '#import', text: 'Import' })]), el('span', { class: 'spacer' }), el('span', { class: 'hint-icon', title: 'A section is a group of pages that share navigation: the side menu, the contents list and previous/next links are generated from the pages in it, in order. Use the dropdown on a page to move it between sections. Sort applies to pages outside sections; pages inside a section keep their navigation order.' }, ['?'])]),
+      el('div', { class: 'page-head' }, [el('div', { class: 'page-head__actions' }, [el('button', { class: 'btn btn--primary', type: 'button', onclick: function () { newPageDialog(); } }, ['+ New page']), el('button', { class: 'btn', type: 'button', onclick: function () { UI.prompt('New section', 'Section title (for example "Undergraduate")', '', 'Create').then(function (t) { if (t) { Store.createSection(t); render(); } }); } }, ['+ New section']), el('a', { class: 'btn', href: '#import', text: 'Import' }), cloudMode() ? el('button', { class: 'btn', type: 'button', onclick: function () { UI.modal({ title: 'Recently deleted pages', wide: true, body: deletedPagesPanel(), buttons: [{ label: 'Done', primary: true, onClick: function () { route(); } }] }); } }, ['Recently deleted']) : null]), el('span', { class: 'spacer' }), el('span', { class: 'hint-icon', title: 'A section is a group of pages that share navigation: the side menu, the contents list and previous/next links are generated from the pages in it, in order. Use the dropdown on a page to move it between sections. Sort applies to pages outside sections; pages inside a section keep their navigation order.' }, ['?'])]),
       el('div', { class: 'filterbar' }, [search, tplSel, statusSel, sortSel, el('span', { class: 'spacer' }), el('button', { class: 'btn btn--sm', type: 'button', onclick: function () { setAll(false); } }, ['Expand all']), el('button', { class: 'btn btn--sm', type: 'button', onclick: function () { setAll(true); } }, ['Collapse all'])]),
       list
     ]);
@@ -917,16 +967,20 @@
       '-'
     ].concat(exportMenuItems(page)).concat(['-',
       { label: 'Duplicate page', onClick: function () { var c = Store.duplicatePage(page.id); toast('Duplicated as "' + c.title + '"', 'success'); go('#edit/' + c.id); } },
-      { label: 'Delete page', onClick: function () { UI.confirm('Delete page', 'Delete "' + page.title + '"? This cannot be undone (unless you have a snapshot or project file).', 'Delete', true).then(function (ok) { if (ok) { Store.deletePage(page.id); toast('Page deleted', 'info'); go('#pages'); } }); } },
+      { label: 'Delete page', onClick: function () { UI.confirm('Delete page', cloudMode() ? 'Delete "' + page.title + '"? Anyone who can edit can bring it back from Recently deleted on the Pages screen.' : 'Delete "' + page.title + '"? This cannot be undone (unless you have a snapshot or project file).', 'Delete', true).then(function (ok) { if (ok) { Store.deletePage(page.id); toast('Page deleted', 'info'); go('#pages'); } }); } },
       '-',
       { label: 'Save project to file (Ctrl+Shift+S)', onClick: function () { saveProjectToFile(false); } },
       { label: 'Open project file', onClick: openProjectFile }
     ]), { icon: 'more', title: 'More actions' });
-    setTopbar([el('a', { class: 'ibtn', href: '#pages', title: 'Back to pages', 'aria-label': 'Back to pages' }, [icon('back')]), titleInput, meta], [controlsHost, cloudChip(), el('span', { id: 'save-status', class: 'save-status' }), el('a', { class: 'btn btn--sm btn--primary', href: pageUrl(page), target: '_blank', rel: 'noopener', title: 'Open the page in a new tab' }, [el('span', { class: 'topbar__open-label', text: 'Open page' }), icon('external', 16)]), more]);
+    setTopbar([el('a', { class: 'ibtn', href: '#pages', title: 'Back to pages', 'aria-label': 'Back to pages' }, [icon('back')]), titleInput, meta], [controlsHost, cloudMode() ? presenceStack() : null, cloudChip(), el('span', { id: 'save-status', class: 'save-status' }), el('a', { class: 'btn btn--sm btn--primary', href: pageUrl(page), target: '_blank', rel: 'noopener', title: 'Open the page in a new tab' }, [el('span', { class: 'topbar__open-label', text: 'Open page' }), icon('external', 16)]), more]);
     sideEl = el('aside', { class: 'editor__side', 'aria-label': 'Inspector' });
     var preview = previewPane({ controlsHost: controlsHost, changes: true, extra: [iconBtn('refresh', 'Refresh the preview', function () { reloadPreview(true); })] });
     var mobileTabs = mobileTabBar();
-    var wrap = el('div', { class: 'editor', 'data-pane': App.mobilePane }, [mobileTabs, el('div', { class: 'editor__body' }, [preview, sideEl])]);
+    var C = window.UOL_CLOUD, viewer = cloudMode() && C.link() && C.link().role === 'viewer';
+    var wrap = el('div', { class: 'editor', 'data-pane': App.mobilePane }, [mobileTabs,
+      viewer ? el('div', { class: 'presence-note presence-note--viewer' }, ['You can view this project but not change it. Changes you make here are not saved.']) : null,
+      el('div', { id: 'presence-note', class: 'presence-note', hidden: true }),
+      el('div', { class: 'editor__body' }, [preview, sideEl])]);
     mobileTabs.bind(wrap);
     if (App.reviewPageId !== page.id) { App.reviewPageId = page.id; App.commentDraft = ''; App.commentTarget = ''; }
     renderEditorSide();
@@ -1109,6 +1163,7 @@
     if (App.sideTab === 'review' && opts.fromPreview && sideEl) { App.selectedBlock = id; setCommentTarget(id); highlightBlock(id, false); return; }
     var changed = App.selectedBlock !== id;
     App.selectedBlock = id;
+    if (cloudMode()) window.UOL_CLOUD.presence.set({ block: id || null });
     if (App.sideTab !== 'block' || changed || (id ? !blockFormEl : !blockListEl)) { App.sideTab = 'block'; renderEditorSide(); }
     highlightBlock(id, opts.scroll);
     if (App.previewMode === 'code' && App.codeScope === 'block') renderCode();
@@ -1293,8 +1348,31 @@
     body.appendChild(holder);
     renderHero();
   }
+  /* hourly copies the cloud keeps of this page while it changes (the last 48) */
+  function cloudCopies(body, page) {
+    var C = window.UOL_CLOUD, box = el('div', {}, [el('p', { class: 'small muted', text: 'Loading…' })]);
+    body.appendChild(el('h3', { class: 'side-subhead', text: 'Hourly cloud copies' }));
+    body.appendChild(box);
+    C.pageHistory(page.id).then(function (rows) {
+      box.innerHTML = '';
+      if (!rows || !rows.length) { box.appendChild(el('p', { class: 'muted small', text: 'None yet. The cloud keeps a copy of the page each hour it is changed, so anyone\'s edit can be undone.' })); return; }
+      rows.forEach(function (h) {
+        box.appendChild(el('div', { class: 'rev' }, [
+          el('div', {}, [el('strong', { text: fmtTime(h.saved_at) }), el('div', { class: 'small muted', text: (h.title || page.title) + (h.saved_by_name ? ' · by ' + h.saved_by_name : '') })]),
+          C.canEdit() ? el('button', { class: 'btn btn--sm', type: 'button', onclick: function () {
+            UI.confirm('Restore cloud copy', 'Put this page back as it was at ' + fmtTime(h.saved_at) + '? The current state is kept as a version first.', 'Restore').then(function (ok) {
+              if (!ok) return;
+              Store.snapshot(page, 'Before restoring the copy from ' + fmtTime(h.saved_at));
+              C.restorePageCopy(h.id).then(function () { pushUndo(); App.openGroup = 'versions'; renderEditorSide(); syncTopFields(); reloadPreview(); toast('Copy restored', 'success'); }, cloudError);
+            });
+          } }, ['Restore']) : null
+        ]));
+      });
+    }, function (e) { box.innerHTML = ''; box.appendChild(el('p', { class: 'small error', text: e.message })); });
+  }
   function renderHistoryList(body) {
     var page = App.page;
+    if (cloudMode() && Store.data) setTimeout(function () { if (App.page === page && body.isConnected) cloudCopies(body, page); }, 0);
     body.appendChild(el('div', { class: 'side-actions' }, [el('button', { class: 'btn btn--primary btn--sm', type: 'button', onclick: saveVersion }, ['Save version now']), el('span', { class: 'muted small', text: 'Autosave is always on. Versions let you go back.' })]));
     var revs = page.revisions || [];
     if (!revs.length) body.appendChild(el('p', { class: 'muted small', text: 'No saved versions yet for this page.' }));
@@ -2633,7 +2711,7 @@
         el('div', { class: 'row' }, [el('button', { class: 'btn btn--primary', type: 'button', onclick: function () { busy('Building ZIP…', X.exportSiteZip(c)); } }, ['Export whole site as ZIP'])])
       ]),
       changeListPanel(),
-      el('div', { class: 'panel panel--danger' }, [
+      el('div', { class: 'panel panel--danger', style: cloudMode() ? 'display:none' : null }, [
         el('h2', { text: 'Start again' }),
         el('div', { class: 'row' }, [el('button', { class: 'btn btn--danger-ghost', type: 'button', onclick: function () { UI.confirm('Reset project', 'Replace everything with the sample site? Take a snapshot or save to a file first if you want to keep your work.', 'Reset everything', true).then(function (ok) { return ok && beforeReplaceAll('Reset project'); }).then(function (ok) { if (ok) { Store.reset(); App.undo = {}; App.redo = {}; toast('Project reset', 'info'); go('#pages'); } }); } }, ['Reset to sample site'])])
       ])
@@ -2642,15 +2720,6 @@
 
   /* ================= cloud: sign in, open, share and restore shared projects ================= */
   var ROLE_TEXT = { owner: 'Owner', editor: 'Can edit', viewer: 'Can view' };
-  function cloudStatusText() {
-    var C = window.UOL_CLOUD, s = C && C.state(); if (!s || !s.link) return '';
-    var bits = [ROLE_TEXT[s.link.role] || s.link.role];
-    if (s.status.message) bits.push(s.status.message);
-    if (s.link.lastSync) bits.push('last cloud save ' + fmtTime(s.link.lastSync));
-    if (s.live) bits.push('live updates on');
-    return bits.join(' · ');
-  }
-  function cloudError(e) { toast(e && e.message ? e.message : String(e), 'error', 7000); }
   function cloudView() {
     var C = window.UOL_CLOUD;
     var wrap = el('div', { class: 'page-wrap page-wrap--narrow cloud' });
@@ -2659,99 +2728,393 @@
       wrap.appendChild(el('div', { class: 'panel panel--danger' }, [el('h2', { text: 'Wrong key in cloud-config.js' }), el('p', { text: 'assets/cms/cloud-config.js contains a secret (service_role) key. That key bypasses every rule in the database, so it must never be in a web page. Remove it, create a new secret key in Supabase (Project Settings, API Keys) so the old one stops working, then paste the publishable key instead.' })]));
       return wrap;
     }
-    if (!C.configured()) {
-      wrap.appendChild(el('div', { class: 'panel' }, [
-        el('h2', { text: 'Cloud saving is not set up yet' }),
-        el('p', { text: 'With cloud saving on, you sign in, your projects are stored online, and you can share a project with colleagues to view or edit. Everything else works as now: the browser copy stays the working copy and exports are unchanged.' }),
-        el('p', { html: 'Setting it up takes about 20 minutes in the browser, with no installs: see <a href="DEPLOY.md" target="_blank" rel="noopener">DEPLOY.md</a> in the project folder, part 3. In short: create a free Supabase project, run <code>supabase/setup.sql</code> in its SQL editor, add accounts, and paste the Project URL and publishable key into <code>assets/cms/cloud-config.js</code>.' })
-      ]));
-      return wrap;
-    }
-    var user = C.user(), l = C.link();
-    if (!user) {
-      var email = el('input', { class: 'input', type: 'email', autocomplete: 'username', required: true, 'aria-label': 'Email' });
-      var pw = el('input', { class: 'input', type: 'password', autocomplete: 'current-password', required: true, 'aria-label': 'Password' });
-      var msg = el('p', { class: 'small', role: 'alert' });
-      var btn = el('button', { class: 'btn btn--primary', type: 'submit' }, ['Sign in']);
-      var form = el('form', { class: 'cloud-signin', onsubmit: function (e) {
-        e.preventDefault(); msg.textContent = ''; btn.disabled = true;
-        C.signIn(email.value, pw.value).then(function () { toast('Signed in', 'success'); afterSignIn(); route(); }).catch(function (err) { msg.className = 'small error'; msg.textContent = /invalid/i.test(err.message) ? 'Email or password not recognised.' : err.message; btn.disabled = false; });
-      } }, [
-        el('label', { class: 'field' }, [el('span', { class: 'field__label', text: 'Email' }), email]),
-        el('label', { class: 'field' }, [el('span', { class: 'field__label', text: 'Password' }), pw]),
-        btn, msg
-      ]);
-      wrap.appendChild(el('div', { class: 'panel' }, [
-        el('h2', { text: 'Sign in to the cloud' }),
-        l ? el('p', { class: 'notice notice--warn small' }, ['This browser is connected to ', el('strong', { text: l.name }), '. Changes are kept here and uploaded when you sign in.']) : null,
-        form,
-        el('p', { class: 'small muted', text: 'Accounts are created by whoever looks after the Supabase project (Authentication, Users). Ask them for one.' })
-      ]));
-      setTimeout(function () { email.focus(); }, 0);
-      return wrap;
-    }
-
-    wrap.appendChild(el('div', { class: 'cloud-account' }, [
-      el('span', {}, ['Signed in as ', el('strong', { text: user.email })]),
-      el('span', { class: 'spacer' }),
-      el('button', { class: 'btn btn--sm', type: 'button', onclick: changePasswordDialog }, ['Change password']),
-      el('button', { class: 'btn btn--sm', type: 'button', onclick: function () { C.signOut().then(function () { toast('Signed out. Your work stays in this browser.', 'info'); route(); }); } }, ['Sign out'])
+    wrap.appendChild(el('div', { class: 'panel' }, [
+      el('h2', { text: 'Cloud saving is not set up yet' }),
+      el('p', { text: 'With cloud saving on, everyone signs in with their own account, projects are stored online, and colleagues work on them together, with their changes arriving within seconds. Until then the CMS works on one project in this browser.' }),
+      el('p', { html: 'Setting it up takes about 20 minutes in the browser, with no installs: see <a href="DEPLOY.md" target="_blank" rel="noopener">DEPLOY.md</a> in the project folder, part 3. In short: create a free Supabase project, run <code>supabase/setup.sql</code> in its SQL editor, and paste the Project URL and publishable key into <code>assets/cms/cloud-config.js</code>.' })
     ]));
-
-    if (l) {
-      var owner = l.role === 'owner';
-      wrap.appendChild(el('div', { class: 'panel panel--cloud' }, [
-        el('h2', {}, ['This browser is working on ', el('span', { class: 'cloud-name', text: l.name })]),
-        el('p', { id: 'cloud-current-status', class: 'small muted', text: cloudStatusText() }),
-        el('p', { class: 'small', text: l.role === 'viewer' ? 'You can view this project. Changes you make stay in this browser and are not shared.' : 'Every change is saved in this browser straight away and uploaded to the cloud a few seconds later. Colleagues\' changes are brought in every minute.' }),
-        el('div', { class: 'row' }, [
-          el('button', { class: 'btn btn--primary btn--sm', type: 'button', onclick: function () { toast('Syncing…', 'info', 1500); C.pull(true).then(function () { return C.canEdit() ? C.push() : null; }).then(function () { route(); }); } }, ['Sync now']),
-          owner ? el('button', { class: 'btn btn--sm', type: 'button', onclick: function () { shareDialog(l.projectId, l.name); } }, [icon('share', 16), ' Share']) : null,
-          owner ? el('button', { class: 'btn btn--sm', type: 'button', onclick: function () { UI.prompt('Rename cloud project', 'Name', l.name, 'Rename').then(function (n) { if (n && n.trim()) C.rename(n.trim()).then(function () { route(); }, cloudError); }); } }, ['Rename']) : null,
-          el('button', { class: 'btn btn--sm', type: 'button', onclick: historyDialog }, ['Earlier copies']),
-          el('span', { class: 'spacer' }),
-          el('button', { class: 'btn btn--sm btn--danger-ghost', type: 'button', onclick: function () { UI.confirm('Disconnect', 'Stop syncing this browser with "' + l.name + '"? Your copy stays here and the cloud project is not changed.', 'Disconnect').then(function (ok) { if (ok) { C.disconnect(); toast('Disconnected. Work stays in this browser.', 'info'); route(); } }); } }, ['Disconnect'])
-        ])
-      ]));
-      if (C.canEdit()) wrap.appendChild(reviewLinksPanel());
-      wrap.appendChild(notifyPanel());
-    } else {
-      var name = el('input', { class: 'input', type: 'text', value: (Store.data.site && Store.data.site.name) || 'Leeds prototype', 'aria-label': 'Cloud project name' });
-      wrap.appendChild(el('div', { class: 'panel panel--cloud' }, [
-        el('h2', { text: 'Put this project in the cloud' }),
-        el('p', { class: 'small', text: 'Uploads the ' + Store.data.pages.length + ' pages, the sections, site settings and images in this browser as a new cloud project you own. From then on every change is saved to the cloud too, and you can share it.' }),
-        el('div', { class: 'row' }, [name, el('button', { class: 'btn btn--primary', type: 'button', onclick: function () {
-          var n = name.value.trim() || 'Leeds prototype'; this.disabled = true; toast('Uploading…', 'info', 2500);
-          C.uploadAsNew(n).then(function () { var br = document.getElementById('banner-root'); if (br) br.innerHTML = ''; toast('"' + n + '" is now in the cloud', 'success', 5000); route(); }, function (e) { cloudError(e); route(); });
-        } }, ['Upload to the cloud'])])
-      ]));
-    }
-
-    var listBox = el('div', {}, [el('p', { class: 'small muted', text: 'Loading your cloud projects…' })]);
-    wrap.appendChild(el('div', { class: 'panel' }, [el('h2', { text: 'Your cloud projects' }), listBox]));
-    C.listProjects().then(function (rows) {
-      listBox.innerHTML = '';
-      if (!rows || !rows.length) { listBox.appendChild(el('p', { class: 'small muted', text: 'Nothing yet. Projects you upload, and projects colleagues share with you, appear here.' })); return; }
-      listBox.appendChild(el('div', { class: 'ptable-wrap' }, [el('table', { class: 'ptable' }, [
-        el('thead', {}, [el('tr', {}, [el('th', {}, ['Project']), el('th', {}, ['Your access']), el('th', { class: 'ptable__hide-sm' }, ['Last saved']), el('th', {}, [''])])]),
-        el('tbody', {}, rows.map(function (r) {
-          var current = l && l.projectId === r.id;
-          return el('tr', { class: current ? 'is-current' : '' }, [
-            el('td', { class: 'ptable__title' }, [el('strong', { text: r.name }), el('span', { class: 'ptable__sub', text: r.role === 'owner' ? 'Yours' : 'Shared by ' + r.owner_email })]),
-            el('td', {}, [el('span', { class: 'status status--' + (r.role === 'viewer' ? 'draft' : 'published'), text: ROLE_TEXT[r.role] || r.role })]),
-            el('td', { class: 'ptable__hide-sm ptable__when', text: fmtTime(r.updated_at) + (r.updated_by_email ? ' by ' + r.updated_by_email.replace(/@.*/, '') : '') }),
-            el('td', {}, [el('span', { class: 'ptable__actions cloud-actions' }, [
-              current ? el('span', { class: 'small muted', text: 'Open here' }) : el('button', { class: 'btn btn--xs btn--primary', type: 'button', onclick: function () { openCloudProject(r); } }, ['Open']),
-              r.role === 'owner' ? el('button', { class: 'btn btn--xs', type: 'button', onclick: function () { shareDialog(r.id, r.name); } }, ['Share']) : null,
-              r.role === 'owner' ? el('button', { class: 'btn btn--xs btn--danger-ghost', type: 'button', onclick: function () {
-                UI.confirm('Delete cloud project', 'Delete "' + r.name + '" from the cloud for everyone, with its images and earlier copies? Copies already open in browsers are not removed.', 'Delete', true).then(function (ok) { if (ok) C.deleteProject(r.id).then(function () { toast('Deleted', 'info'); route(); }, cloudError); });
-              } }, ['Delete']) : null
-            ])])
-          ]);
-        }))
-      ])]));
-    }, function (e) { listBox.innerHTML = ''; listBox.appendChild(el('p', { class: 'error small', text: 'Could not load projects: ' + e.message })); });
     return wrap;
+  }
+
+  /* ================= accounts: sign in, sign up, password ================= */
+  function authField(label, input, hint) { return el('label', { class: 'field' }, [el('span', { class: 'field__label', text: label }), input, hint ? el('span', { class: 'field__hint', text: hint }) : null]); }
+  function renderAuth(screen, info) {
+    var C = window.UOL_CLOUD;
+    if (screen) App.authScreen = screen;
+    screen = App.authScreen || 'signin'; info = info || App.authInfo || {};
+    App.authInfo = info;
+    document.getElementById('topbar').innerHTML = '';
+    var br = document.getElementById('banner-root'); if (br) br.innerHTML = '';
+    var root = document.getElementById('app');
+    root.innerHTML = ''; root.className = 'app app--auth';
+    var back = App.authReturn && App.authReturn.error ? App.authReturn.error : '';
+    var msg = el('p', { class: 'auth__msg', role: 'alert' });
+    function fail(e) { msg.className = 'auth__msg auth__msg--error'; msg.textContent = e && e.message ? e.message : String(e); }
+    function busy(btn, on, label) { btn.disabled = on; btn.textContent = on ? 'Please wait…' : label; }
+    var card;
+    if (screen === 'signup') {
+      var name = el('input', { class: 'input', type: 'text', autocomplete: 'name', required: true, maxlength: '80' });
+      var email = el('input', { class: 'input', type: 'email', autocomplete: 'email', required: true, value: info.email || '' });
+      var pw = el('input', { class: 'input', type: 'password', autocomplete: 'new-password', required: true, minlength: '8' });
+      var go1 = el('button', { class: 'btn btn--primary btn--block', type: 'submit' }, ['Create account']);
+      card = el('form', { class: 'auth__card', onsubmit: function (e) {
+        e.preventDefault(); msg.textContent = '';
+        if (!C.emailAllowed(email.value)) { fail('Use your ' + C.domainsText() + ' email address.'); email.focus(); return; }
+        if (pw.value.length < 8) { fail('Choose a password of at least 8 characters.'); pw.focus(); return; }
+        busy(go1, true, 'Create account');
+        C.signUp(email.value, pw.value, name.value).then(function (r) {
+          if (r.signedIn) { App.authScreen = 'signin'; document.body.classList.remove('is-auth'); signedInStart(); }
+          else renderAuth('sent', { email: email.value.trim() });
+        }, function (e) { busy(go1, false, 'Create account'); fail(e); });
+      } }, [
+        el('h1', { text: 'Create your account' }),
+        el('p', { class: 'auth__lead', text: 'Use your ' + C.domainsText() + ' email address. Colleagues who share a project with you will see your name.' }),
+        authField('Your name', name), authField('Email', email), authField('Password', pw, 'At least 8 characters'),
+        msg, go1,
+        el('p', { class: 'auth__switch' }, ['Already have an account? ', el('a', { href: '#', onclick: function (e) { e.preventDefault(); renderAuth('signin', { email: email.value }); } }, ['Sign in'])])
+      ]);
+      setTimeout(function () { name.focus(); }, 0);
+    } else if (screen === 'forgot') {
+      var femail = el('input', { class: 'input', type: 'email', autocomplete: 'email', required: true, value: info.email || '' });
+      var go2 = el('button', { class: 'btn btn--primary btn--block', type: 'submit' }, ['Send the link']);
+      card = el('form', { class: 'auth__card', onsubmit: function (e) {
+        e.preventDefault(); busy(go2, true, 'Send the link');
+        C.requestReset(femail.value).then(function () { renderAuth('reset-sent', { email: femail.value.trim() }); }, function (er) { busy(go2, false, 'Send the link'); fail(er); });
+      } }, [
+        el('h1', { text: 'Reset your password' }),
+        el('p', { class: 'auth__lead', text: 'We will email you a link. Open it on this device to choose a new password.' }),
+        authField('Email', femail), msg, go2,
+        el('p', { class: 'auth__switch' }, [el('a', { href: '#', onclick: function (e) { e.preventDefault(); renderAuth('signin', { email: femail.value }); } }, ['Back to sign in'])])
+      ]);
+      setTimeout(function () { femail.focus(); }, 0);
+    } else if (screen === 'sent' || screen === 'reset-sent') {
+      var resend = el('button', { class: 'btn', type: 'button', onclick: function () {
+        resend.disabled = true;
+        (screen === 'sent' ? C.resendConfirmation(info.email) : C.requestReset(info.email)).then(function () { toast('Sent again', 'success'); }, fail).then(function () { setTimeout(function () { resend.disabled = false; }, 20000); });
+      } }, ['Send it again']);
+      card = el('div', { class: 'auth__card auth__card--center' }, [
+        el('div', { class: 'auth__mail', 'aria-hidden': 'true', html: '<svg viewBox="0 0 24 24" width="34" height="34" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg>' }),
+        el('h1', { text: 'Check your email' }),
+        el('p', { class: 'auth__lead' }, [screen === 'sent' ? 'We sent a link to ' : 'We sent a password link to ', el('strong', { text: info.email || 'your address' }), screen === 'sent' ? '. Open it to confirm your address and finish creating your account.' : '. Open it on this device to choose a new password.']),
+        el('p', { class: 'small muted', text: 'Nothing there after a few minutes? Look in junk mail, or send it again.' }),
+        msg, el('div', { class: 'row row--center' }, [resend, el('button', { class: 'btn', type: 'button', onclick: function () { renderAuth('signin', { email: info.email }); } }, ['Back to sign in'])])
+      ]);
+    } else {
+      var semail = el('input', { class: 'input', type: 'email', autocomplete: 'username', required: true, value: info.email || '' });
+      var spw = el('input', { class: 'input', type: 'password', autocomplete: 'current-password', required: true });
+      var go3 = el('button', { class: 'btn btn--primary btn--block', type: 'submit' }, ['Sign in']);
+      var extra = el('div');
+      card = el('form', { class: 'auth__card', onsubmit: function (e) {
+        e.preventDefault(); msg.textContent = ''; extra.innerHTML = ''; busy(go3, true, 'Sign in');
+        C.signIn(semail.value, spw.value).then(function () { App.authReturn = null; document.body.classList.remove('is-auth'); signedInStart(); }, function (er) {
+          busy(go3, false, 'Sign in'); fail(er);
+          if (er.unconfirmed) extra.appendChild(el('button', { class: 'btn btn--sm', type: 'button', onclick: function () { C.resendConfirmation(semail.value).then(function () { renderAuth('sent', { email: semail.value.trim() }); }, fail); } }, ['Send the confirmation email again']));
+        });
+      } }, [
+        el('h1', { text: 'Sign in' }),
+        el('p', { class: 'auth__lead', text: 'Welcome back. Your projects are waiting.' }),
+        back ? el('p', { class: 'auth__msg auth__msg--error', text: back }) : null,
+        authField('Email', semail), authField('Password', spw),
+        el('p', { class: 'auth__forgot' }, [el('a', { href: '#', onclick: function (e) { e.preventDefault(); renderAuth('forgot', { email: semail.value }); } }, ['Forgot your password?'])]),
+        msg, extra, go3,
+        el('p', { class: 'auth__switch' }, ['New here? ', el('a', { href: '#', onclick: function (e) { e.preventDefault(); renderAuth('signup', { email: semail.value }); } }, ['Create an account'])])
+      ]);
+      setTimeout(function () { (semail.value ? spw : semail).focus(); }, 0);
+    }
+    root.appendChild(el('div', { class: 'auth' }, [
+      el('section', { class: 'auth__brand', 'aria-label': 'About the Leeds prototyping CMS' }, [
+        el('div', { class: 'auth__logo', 'aria-hidden': 'true', text: 'L' }),
+        el('h2', { text: 'Leeds prototyping CMS' }),
+        el('p', { text: 'Prototype leeds.ac.uk pages with the real design system, review them with colleagues and stakeholders, and hand a clear change list to whoever updates Jadu.' }),
+        authArt(),
+        el('ul', { class: 'auth__points' }, [
+          el('li', { text: 'Import live pages, or build new ones from the component library' }),
+          el('li', { text: 'Work on a project together, and see who is on which page' }),
+          el('li', { text: 'Comments, sign-off and review links for people without an account' })
+        ])
+      ]),
+      el('section', { class: 'auth__panel' }, [card])
+    ]));
+  }
+  /* a small moving picture of the editor for the sign-in screen (still when reduced motion is preferred) */
+  function authArt() {
+    return el('div', { class: 'auth-art', 'aria-hidden': 'true' }, [
+      el('div', { class: 'auth-art__bar' }, [el('i'), el('i'), el('i')]),
+      el('div', { class: 'auth-art__page' }, [
+        el('div', { class: 'auth-art__hero' }),
+        el('div', { class: 'auth-art__block auth-art__block--a' }, [el('span'), el('span'), el('span', { class: 'short' })]),
+        el('div', { class: 'auth-art__block auth-art__block--b' }, [el('b'), el('b'), el('b')]),
+        el('div', { class: 'auth-art__block auth-art__block--c' }, [el('span'), el('span', { class: 'short' })]),
+        el('div', { class: 'auth-art__cursor' })
+      ]),
+      el('div', { class: 'auth-art__avatars' }, [el('i', { text: 'SB' }), el('i', { text: 'AK' })])
+    ]);
+  }
+  function initials(name) { var w = String(name || '?').trim().split(/[\s.@_-]+/).filter(Boolean); return ((w[0] || '?')[0] + (w.length > 1 ? w[w.length - 1][0] : '')).toUpperCase(); }
+  /* the account button at the foot of the rail, with its menu */
+  function accountButton() {
+    var C = window.UOL_CLOUD, prof = C.cachedProfile() || {}, u = C.user() || {};
+    var name = prof.name || String(u.email || '').split('@')[0];
+    var menu = el('div', { class: 'menu account-menu', hidden: true }, [
+      el('div', { class: 'account-menu__who' }, [el('strong', { text: name }), el('span', { class: 'small muted', text: u.email || '' })]),
+      el('hr'),
+      el('button', { type: 'button', class: 'menu__item', onclick: function () { menu.hidden = true; nameDialog(); } }, ['Change your name']),
+      el('button', { type: 'button', class: 'menu__item', onclick: function () { menu.hidden = true; changePasswordDialog(false); } }, ['Change password']),
+      el('button', { type: 'button', class: 'menu__item', onclick: function () { menu.hidden = true; startTour(false); } }, ['Watch the tour']),
+      el('hr'),
+      el('button', { type: 'button', class: 'menu__item', onclick: function () { menu.hidden = true; signOutNow(); } }, ['Sign out'])
+    ]);
+    var btn = el('button', { type: 'button', class: 'rail__avatar', title: name + ' (' + (u.email || '') + ')', 'aria-label': 'Your account: ' + name, 'aria-haspopup': 'true', onclick: function (e) { e.stopPropagation(); var open = menu.hidden; document.querySelectorAll('.menu').forEach(function (m) { m.hidden = true; }); menu.hidden = !open; } }, [initials(name)]);
+    document.addEventListener('click', function () { menu.hidden = true; });
+    return el('div', { class: 'rail__account' }, [btn, menu]);
+  }
+  function signOutNow() {
+    var C = window.UOL_CLOUD;
+    if (App.dirty) saveNow();
+    C.signOut().then(function () { return Store.close(); }).then(function () {
+      App.page = null; App.undo = {}; App.redo = {}; App.people = []; App.authScreen = 'signin'; App.authInfo = {};
+      buildRail(); toast('Signed out', 'info'); location.hash = ''; route();
+    });
+  }
+  function nameDialog() {
+    var C = window.UOL_CLOUD, prof = C.cachedProfile() || {};
+    UI.prompt('Your name', 'Shown to colleagues working on the same projects', prof.name || '', 'Save').then(function (n) {
+      if (n === null || !n.trim()) return;
+      C.setName(n.trim()).then(function () { toast('Name saved', 'success'); buildRail(); setRailActive(App.view); }, cloudError);
+    });
+  }
+  function startTour(auto) {
+    var C = window.UOL_CLOUD, T = window.UOL_TOUR; if (!T) return;
+    var prof = C && C.cachedProfile();
+    T.start({ name: prof ? prof.name : '', onDone: function () { if (auto && C && C.user()) C.setOnboarded(true).catch(function () {}); } });
+  }
+
+  /* ================= presence: who else is in the project, and where ================= */
+  function presenceStack() { return el('div', { id: 'presence-stack', class: 'presence', 'aria-live': 'polite' }); }
+  function pageTitle(id) { var p = id && Store.data && Store.getPage(id); return p ? p.title : ''; }
+  function avatar(p, small) { return el('span', { class: 'avatar' + (small ? ' avatar--sm' : ''), style: 'background:' + p.colour, title: p.name + (p.page ? ' is on "' + pageTitle(p.page) + '"' : ' is in this project'), text: initials(p.name) }); }
+  function renderPresence() {
+    var people = (App.people || []).filter(function (p) { return !Store.data || !p.page || Store.getPage(p.page); });
+    var stack = document.getElementById('presence-stack');
+    if (stack) {
+      stack.innerHTML = '';
+      people.slice(0, 4).forEach(function (p) { stack.appendChild(avatar(p)); });
+      if (people.length > 4) stack.appendChild(el('span', { class: 'avatar avatar--more', text: '+' + (people.length - 4), title: people.slice(4).map(function (p) { return p.name; }).join(', ') }));
+      stack.title = people.length ? people.map(function (p) { return p.name + (p.page ? ' (' + pageTitle(p.page) + ')' : ''); }).join(', ') : '';
+    }
+    // the Pages table: who is on each page
+    document.querySelectorAll('[data-people]').forEach(function (slot) {
+      var id = slot.getAttribute('data-people'); slot.innerHTML = '';
+      people.filter(function (p) { return p.page === id; }).forEach(function (p) { slot.appendChild(avatar(p, true)); });
+    });
+    // the editor: a note when someone else has this page open, and their selected blocks in the preview
+    var here = App.view === 'edit' && App.page ? people.filter(function (p) { return p.page === App.page.id; }) : [];
+    var note = document.getElementById('presence-note');
+    if (note) {
+      note.innerHTML = ''; note.hidden = !here.length;
+      if (here.length) { here.forEach(function (p) { note.appendChild(avatar(p, true)); }); note.appendChild(el('span', { text: here.map(function (p) { return p.name; }).join(' and ') + (here.length === 1 ? ' is' : ' are') + ' on this page too. Edits to different blocks are merged.' })); }
+    }
+    if (here.length && App.page && App.warnedPage !== App.page.id) { App.warnedPage = App.page.id; toast(here.map(function (p) { return p.name; }).join(' and ') + (here.length === 1 ? ' is' : ' are') + ' working on this page too. Changes to different blocks are merged; if you both change the same block, the later edit is kept.', 'info', 7000); }
+    if (Preview.iframe && Preview.ready && App.view === 'edit') {
+      try { Preview.iframe.contentWindow.postMessage({ uolcms: 'presence', marks: here.filter(function (p) { return p.block; }).map(function (p) { return { id: p.block, name: p.name, colour: p.colour }; }) }, '*'); } catch (e) {}
+    }
+  }
+
+  /* ================= projects ================= */
+  function projectsView() {
+    var C = window.UOL_CLOUD;
+    var wrap = el('div', { class: 'page-wrap projects' });
+    var grid = el('div', { class: 'pgrid' }, [el('p', { class: 'small muted', text: 'Loading your projects…' })]);
+    var legacyBox = el('div');
+    wrap.appendChild(el('div', { class: 'projects__head' }, [
+      el('div', {}, [el('h2', { class: 'projects__title', text: 'Your projects' }), el('p', { class: 'small muted', text: 'Projects you made and the ones colleagues share with you. Everything is saved in the cloud.' })]),
+      el('div', { class: 'row' }, [
+        el('button', { class: 'btn', type: 'button', onclick: newProjectFromFile }, [icon('open', 16), ' From a project file']),
+        el('button', { class: 'btn btn--primary', type: 'button', onclick: newProjectDialog }, [icon('plus', 16), ' New project'])
+      ])
+    ]));
+    wrap.appendChild(legacyBox);
+    wrap.appendChild(grid);
+    C.listProjects().then(function (rows) {
+      rows = rows || [];
+      grid.innerHTML = '';
+      legacyCard(legacyBox, rows);
+      if (!rows.length) {
+        grid.appendChild(el('div', { class: 'pempty' }, [
+          el('div', { class: 'pempty__art', 'aria-hidden': 'true' }, [icon('projects', 40)]),
+          el('h3', { text: 'No projects yet' }),
+          el('p', { text: 'Start a new project, bring one in from a project file, or ask a colleague to share theirs with ' + ((C.user() || {}).email || 'you') + '.' }),
+          el('button', { class: 'btn btn--primary', type: 'button', onclick: newProjectDialog }, [icon('plus', 16), ' New project'])
+        ]));
+        return;
+      }
+      var cur = C.link();
+      rows.forEach(function (r) { grid.appendChild(projectCard(r, cur && cur.projectId === r.id)); });
+    }, function (e) { grid.innerHTML = ''; grid.appendChild(el('p', { class: 'error small', text: 'Could not load your projects: ' + e.message })); });
+    return wrap;
+  }
+  function projectCard(r, isOpen) {
+    var C = window.UOL_CLOUD, owner = r.role === 'owner';
+    var open = function () { if (isOpen) { go('#pages'); return; } openCloud(r.id, r.role, r.name).then(function () { go('#pages'); }, function () {}); };
+    var items = [{ label: isOpen ? 'Go to its pages' : 'Open', onClick: open }];
+    if (owner) {
+      items.push({ label: 'Share…', onClick: function () { shareDialog(r.id, r.name); } });
+      items.push({ label: 'Rename…', onClick: function () { UI.prompt('Rename project', 'Name', r.name, 'Rename').then(function (n) { if (!n || !n.trim()) return; (isOpen ? C.rename(n.trim()) : C.renameProject(r.id, r.version, n.trim())).then(function (row) { if (!row) throw new Error('Someone changed the project just now; try again'); toast('Renamed', 'success'); route(); }).catch(cloudError); }); } });
+      items.push('-');
+      items.push({ label: 'Delete…', onClick: function () { UI.confirm('Delete project', 'Delete "' + r.name + '" for everyone, with its pages, images, comments and review links? This cannot be undone.', 'Delete', true).then(function (ok) { if (ok) C.deleteProject(r.id).then(function () { toast('Deleted', 'info'); buildRail(); route(); }, cloudError); }); } });
+    } else {
+      items.push('-');
+      items.push({ label: 'Leave this project…', onClick: function () { UI.confirm('Leave project', 'Stop working on "' + r.name + '"? ' + r.owner_name + ' can share it with you again.', 'Leave', true).then(function (ok) { if (ok) C.leave(r.id).then(function () { toast('You left "' + r.name + '"', 'info'); buildRail(); route(); }, cloudError); }); } });
+    }
+    var sub = [owner ? 'Yours' : 'Shared by ' + (r.owner_name || r.owner_email), (r.page_count || 0) + ' page' + (r.page_count === 1 ? '' : 's'), (r.member_count || 1) + (r.member_count === 1 ? ' person' : ' people')].join(' · ');
+    return el('div', { class: 'pcard' + (isOpen ? ' is-open' : '') }, [
+      el('button', { type: 'button', class: 'pcard__main', onclick: open }, [
+        el('span', { class: 'pcard__icon', style: 'background:' + window.UOL_CLOUD.presence.colour(r.id), 'aria-hidden': 'true', text: initials(r.name) }),
+        el('span', { class: 'pcard__text' }, [
+          el('strong', { class: 'pcard__name', text: r.name }),
+          el('span', { class: 'small muted', text: sub }),
+          el('span', { class: 'small muted', text: 'Updated ' + fmtTime(r.updated_at) + (r.updated_by_name ? ' by ' + r.updated_by_name : '') })
+        ])
+      ]),
+      el('div', { class: 'pcard__side' }, [
+        isOpen ? el('span', { class: 'status status--published', text: 'Open' }) : el('span', { class: 'status status--' + (r.role === 'viewer' ? 'draft' : 'published'), text: ROLE_TEXT[r.role] || r.role }),
+        menuButton(null, items, { icon: 'more', title: 'More for this project' })
+      ])
+    ]);
+  }
+  function newProjectDialog() {
+    var C = window.UOL_CLOUD;
+    var name = el('input', { class: 'input', type: 'text', value: 'New prototype', 'aria-label': 'Project name' });
+    var blank = el('input', { type: 'radio', name: 'np-start', value: 'blank', checked: true }), ex = el('input', { type: 'radio', name: 'np-start', value: 'examples' });
+    var msg = el('p', { class: 'small error', role: 'alert' });
+    UI.modal({ title: 'New project', body: el('div', {}, [
+      authField('Name', name),
+      el('div', { class: 'field' }, [el('span', { class: 'field__label', text: 'Start with' }),
+        el('label', { class: 'choice' }, [blank, el('span', {}, [el('strong', { text: 'An empty project' }), el('span', { class: 'small muted', text: 'The Leeds site settings and no pages. Import pages or add your own.' })])]),
+        el('label', { class: 'choice' }, [ex, el('span', {}, [el('strong', { text: 'Example pages' }), el('span', { class: 'small muted', text: 'A homepage, document pages and an article to try things on.' })])])
+      ]),
+      el('p', { class: 'small muted', text: 'Only you can see it until you share it.' }), msg
+    ]), buttons: [{ label: 'Cancel' }, { label: 'Create project', primary: true, onClick: function (api) {
+      var n = name.value.trim(); if (!n) { name.focus(); return false; }
+      msg.textContent = '';
+      C.createProject(n, Store.seed(blank.checked)).then(function () { if (api && api.close) api.close(); App.data = Store.data; App.undo = {}; App.redo = {}; buildRail(); toast('"' + n + '" is ready', 'success'); go('#pages'); }, function (e) { msg.textContent = e.message; });
+      return false;
+    } }] });
+    setTimeout(function () { name.select(); }, 30);
+  }
+  /* a project file (from Save to file, or from before accounts) becomes a new cloud project */
+  function newProjectFromFile() {
+    var C = window.UOL_CLOUD;
+    var input = el('input', { type: 'file', accept: '.json,application/json' });
+    input.addEventListener('change', function () {
+      var f = input.files[0]; if (!f) return;
+      f.text().then(function (t) {
+        var obj = JSON.parse(t);
+        if (!obj.site || !Array.isArray(obj.pages)) throw new Error('This is not a Leeds CMS project file');
+        var name = (obj.site && obj.site.name ? obj.site.name : f.name.replace(/\.json$/i, '')) || 'Imported project';
+        return UI.prompt('New project from a file', 'Name', name, 'Create project').then(function (n) {
+          if (!n || !n.trim()) return;
+          toast('Creating "' + n.trim() + '" and uploading ' + obj.pages.length + ' pages…', 'info', 4000);
+          var imgs = Array.isArray(obj.media) && obj.media.length ? M.importRecords(obj.media) : Promise.resolve(0);
+          return imgs.then(function () { return C.createProject(n.trim(), { site: obj.site, pages: obj.pages, sections: obj.sections || [] }); }).then(function () {
+            App.data = Store.data; App.undo = {}; App.redo = {}; afterProjectOpen(); buildRail(); toast('"' + n.trim() + '" is ready', 'success'); go('#pages');
+          });
+        });
+      }).catch(function (e) { toast('Could not use that file: ' + e.message, 'error', 6000); });
+    });
+    input.click();
+  }
+  /* work left in this browser by the CMS before accounts: offer to make it a project */
+  function legacyCard(box, rows) {
+    var C = window.UOL_CLOUD, d = Store.legacy(); box.innerHTML = '';
+    if (!d || Store.isSeed(d)) return;
+    var old = C.legacyLink();
+    if (old && rows.some(function (r) { return r.id === old.projectId; })) {
+      box.appendChild(el('div', { class: 'notice notice--info legacy' }, ['This browser has work from before accounts that belongs to ', el('strong', { text: old.name || 'one of your projects' }), '. It is brought in when you open that project.']));
+      return;
+    }
+    var name = (d.site && d.site.name) || 'Leeds prototype';
+    box.appendChild(el('div', { class: 'panel legacy' }, [
+      el('h3', { text: 'Work from before accounts' }),
+      el('p', { class: 'small' }, ['This browser has a project with ', el('strong', { text: d.pages.length + ' page' + (d.pages.length === 1 ? '' : 's') }), ' that is not in your account yet. Make it a project to keep working on it and share it.']),
+      el('div', { class: 'row' }, [
+        el('button', { class: 'btn btn--primary btn--sm', type: 'button', onclick: function () {
+          this.disabled = true; toast('Uploading…', 'info', 3000);
+          C.createProject(name, d).then(function () { Store.legacyDone(); C.forgetLegacyLink(); App.data = Store.data; afterProjectOpen(); buildRail(); toast('"' + name + '" is now a project in your account', 'success', 5000); go('#pages'); }, function (e) { cloudError(e); route(); });
+        } }, ['Make it a project']),
+        el('button', { class: 'btn btn--sm', type: 'button', onclick: function () { X.download(new Blob([JSON.stringify({ exportedAt: new Date().toISOString(), version: 2, site: d.site, pages: d.pages, sections: d.sections || [] }, null, 2)], { type: 'application/json' }), 'leeds-cms-project.json'); } }, ['Download as a file']),
+        el('button', { class: 'btn btn--sm btn--danger-ghost', type: 'button', onclick: function () { UI.confirm('Not now', 'Hide this? The work stays in this browser; you can still bring it in with "From a project file" after downloading it.', 'Hide').then(function (ok) { if (ok) { Store.legacyDone(); box.innerHTML = ''; } }); } }, ['Hide'])
+      ])
+    ]));
+  }
+
+  /* ================= sharing: people, review links, emails, earlier copies, deleted pages ================= */
+  function cloudStatusText() {
+    var C = window.UOL_CLOUD, s = C && C.state(); if (!s || !s.link) return '';
+    var bits = [ROLE_TEXT[s.link.role] || s.link.role];
+    if (s.status.message) bits.push(s.status.message);
+    if (s.link.lastSync) bits.push('last checked ' + fmtTime(s.link.lastSync));
+    if (s.live) bits.push('live updates on');
+    return bits.join(' · ');
+  }
+  function cloudError(e) { toast(e && e.message ? e.message : String(e), 'error', 7000); }
+  function sharingView() {
+    var C = window.UOL_CLOUD, l = C.link();
+    var wrap = el('div', { class: 'page-wrap page-wrap--narrow cloud' });
+    if (!l) return wrap;
+    var owner = l.role === 'owner';
+    wrap.appendChild(el('div', { class: 'panel panel--cloud' }, [
+      el('h2', {}, [el('span', { class: 'cloud-name', text: l.name })]),
+      el('p', { id: 'cloud-current-status', class: 'small muted', text: cloudStatusText() }),
+      el('p', { class: 'small', text: l.role === 'viewer' ? 'You can view this project. Changes you make are not saved to it.' : 'Every change is saved to the cloud a few seconds after you make it, and colleagues\' changes arrive within seconds. This browser keeps a copy, so the project opens straight away and you can keep working if the connection drops.' }),
+      el('div', { class: 'row' }, [
+        el('button', { class: 'btn btn--sm', type: 'button', onclick: function () { toast('Checking…', 'info', 1500); C.pull(true).then(function () { return C.canEdit() ? C.push() : null; }).then(function () { route(); }); } }, ['Check now']),
+        owner ? el('button', { class: 'btn btn--sm', type: 'button', onclick: function () { UI.prompt('Rename project', 'Name', l.name, 'Rename').then(function (n) { if (n && n.trim()) C.rename(n.trim()).then(function () { route(); }, cloudError); }); } }, ['Rename']) : null,
+        el('button', { class: 'btn btn--sm', type: 'button', onclick: historyDialog }, ['Earlier copies of the settings'])
+      ])
+    ]));
+    wrap.appendChild(el('div', { class: 'panel' }, [el('h2', { text: 'People' }), peoplePanel(l.projectId, owner)]));
+    if (C.canEdit()) wrap.appendChild(reviewLinksPanel());
+    wrap.appendChild(notifyPanel());
+    wrap.appendChild(deletedPagesPanel());
+    return wrap;
+  }
+  /* who is on a project, invitations waiting for an account, and (for the owner) adding people */
+  function peoplePanel(projectId, owner) {
+    var C = window.UOL_CLOUD, list = el('div', { class: 'cloud-members' }), msg = el('p', { class: 'small', role: 'alert' });
+    function load() {
+      C.members(projectId).then(function (rows) {
+        list.innerHTML = '';
+        (rows || []).forEach(function (m) {
+          var meRow = m.user_id && C.user() && m.user_id === C.user().id;
+          list.appendChild(el('div', { class: 'rev' }, [
+            el('div', { class: 'member' }, [
+              el('span', { class: 'avatar avatar--sm', style: 'background:' + (m.pending ? '#9a9590' : C.presence.colour(m.user_id)), text: initials(m.name || m.email) }),
+              el('div', {}, [el('strong', { text: m.pending ? m.email : (m.name || m.email) + (meRow ? ' (you)' : '') }), el('div', { class: 'small muted', text: m.pending ? 'Invited · ' + (ROLE_TEXT[m.role] || m.role) + ' · joins when they create an account' : m.email + ' · ' + (ROLE_TEXT[m.role] || m.role) })])
+            ]),
+            owner && m.role !== 'owner' ? el('button', { class: 'btn btn--sm btn--danger-ghost', type: 'button', onclick: function () { (m.pending ? C.cancelInvite(projectId, m.email) : C.unshare(projectId, m.user_id)).then(load, function (e) { msg.className = 'small error'; msg.textContent = e.message; }); } }, [m.pending ? 'Cancel invitation' : 'Remove']) : null
+          ]));
+        });
+      }, function (e) { msg.className = 'small error'; msg.textContent = e.message; });
+    }
+    load();
+    var box = el('div', {}, [list]);
+    if (owner) {
+      var email = el('input', { class: 'input', type: 'email', placeholder: 'colleague@leeds.ac.uk', 'aria-label': 'Colleague\'s email' });
+      var role = el('select', { class: 'input input--sm', 'aria-label': 'Access' }, [el('option', { value: 'editor', text: 'Can edit' }), el('option', { value: 'viewer', text: 'Can view' })]);
+      var add = function () {
+        msg.className = 'small'; msg.textContent = '';
+        var addr = email.value.trim(); if (!addr) { email.focus(); return; }
+        C.share(projectId, addr, role.value).then(function (r) { toast(r === 'invited' ? addr + ' is invited. They join when they create an account with that address.' : 'Shared with ' + addr, 'success', 6000); email.value = ''; load(); }, function (e) { msg.className = 'small error'; msg.textContent = e.message; });
+      };
+      email.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); add(); } });
+      box.appendChild(el('div', { class: 'field', style: 'margin-top:14px' }, [el('span', { class: 'field__label', text: 'Add someone' }), el('div', { class: 'row' }, [email, role, el('button', { class: 'btn btn--primary', type: 'button', onclick: add }, ['Share'])])]));
+      box.appendChild(el('p', { class: 'small muted', text: 'Colleagues without an account are invited: they join as soon as they create one with that address.' }));
+    } else {
+      box.appendChild(el('div', { class: 'row', style: 'margin-top:10px' }, [el('button', { class: 'btn btn--sm btn--danger-ghost', type: 'button', onclick: function () { var l = C.link(); UI.confirm('Leave project', 'Stop working on this project? The owner can share it with you again.', 'Leave', true).then(function (ok) { if (ok) C.leave(projectId).then(function () { toast('You left "' + (l ? l.name : 'the project') + '"', 'info'); buildRail(); go('#projects'); }, cloudError); }); } }, ['Leave this project'])]));
+    }
+    box.appendChild(msg);
+    return box;
   }
   /* each person's email choices for this project; only shown once notifications are set up in Supabase */
   function notifyPanel() {
@@ -2768,68 +3131,42 @@
     }, function (e) { box.innerHTML = ''; box.appendChild(el('p', { class: 'small error', text: e.message })); });
     return el('div', { class: 'panel' }, [el('h2', { text: 'Email notifications' }), box]);
   }
-  function afterSignIn() {
-    var C = window.UOL_CLOUD, l = C && C.link(); if (!l) return;
-    // refresh the role (it may have changed) and pick up where this browser left off
-    C.refreshLink().then(function () { return C.pull(false); }).then(function () { renderCloudChip(); });
-  }
-  function openCloudProject(r) {
-    var C = window.UOL_CLOUD, l = C.link();
-    var body = el('div', {}, [
-      el('p', {}, ['Open ', el('strong', { text: r.name }), ' in this browser? It replaces the project you have open here now.']),
-      el('p', { class: 'small muted', text: l ? 'The current cloud project keeps all its changes; this browser just switches to the other one.' : 'Your current project is kept as a snapshot first (Save and export, Snapshots), so nothing is lost.' })
-    ]);
-    UI.modal({ title: 'Open cloud project', body: body, buttons: [{ label: 'Cancel' }, { label: 'Open', primary: true, onClick: function () {
-      var first = (l && C.canEdit()) ? C.push() : Promise.resolve();
-      first.then(function () { return l ? null : saveSnapshot('Before opening "' + r.name + '" from the cloud'); }).then(function () {
-        toast('Opening "' + r.name + '"…', 'info', 2500);
-        return C.openProject(r.id, r.role);
-      }).then(function () { App.undo = {}; App.redo = {}; App.page = null; toast('"' + r.name + '" is open', 'success'); go('#pages'); }, cloudError);
-    } }] });
-  }
-  function shareDialog(projectId, name) {
-    var C = window.UOL_CLOUD;
-    var list = el('div', { class: 'cloud-members' });
-    var email = el('input', { class: 'input', type: 'email', placeholder: 'colleague@leeds.ac.uk', 'aria-label': 'Colleague\'s email' });
-    var role = el('select', { class: 'input input--sm', 'aria-label': 'Access' }, [el('option', { value: 'editor', text: 'Can edit' }), el('option', { value: 'viewer', text: 'Can view' })]);
-    var msg = el('p', { class: 'small', role: 'alert' });
+  /* pages deleted by anyone on the project, to bring back */
+  function deletedPagesPanel() {
+    var C = window.UOL_CLOUD, l = C.link(), box = el('div', {}, [el('p', { class: 'small muted', text: 'Loading…' })]);
     function load() {
-      list.innerHTML = '';
-      C.members(projectId).then(function (rows) {
-        (rows || []).forEach(function (m) {
-          list.appendChild(el('div', { class: 'rev' }, [
-            el('div', {}, [el('strong', { text: m.email }), el('div', { class: 'small muted', text: ROLE_TEXT[m.role] || m.role })]),
-            m.role === 'owner' ? el('span') : el('button', { class: 'btn btn--sm btn--danger-ghost', type: 'button', onclick: function () { C.unshare(projectId, m.user_id).then(load, function (e) { msg.textContent = e.message; }); } }, ['Remove'])
+      C.deletedPages().then(function (rows) {
+        box.innerHTML = '';
+        if (!rows || !rows.length) { box.appendChild(el('p', { class: 'small muted', text: 'No deleted pages.' })); return; }
+        rows.forEach(function (r) {
+          box.appendChild(el('div', { class: 'rev' }, [
+            el('div', {}, [el('strong', { text: r.title || 'Untitled page' }), el('div', { class: 'small muted', text: '/' + (r.slug || '') + ' · deleted ' + fmtTime(r.deleted_at) + (r.deleted_by_name ? ' by ' + r.deleted_by_name : '') })]),
+            el('div', {}, [
+              C.canEdit() ? el('button', { class: 'btn btn--sm', type: 'button', onclick: function () { C.restoreDeleted(r.id).then(function () { toast('"' + (r.title || 'Page') + '" is back', 'success'); load(); }, cloudError); } }, ['Restore']) : null,
+              l.role === 'owner' ? el('button', { class: 'btn btn--sm btn--danger-ghost', type: 'button', onclick: function () { UI.confirm('Remove for good', 'Remove "' + (r.title || 'this page') + '" for good, with its comments, sign-off and earlier copies? This cannot be undone.', 'Remove', true).then(function (ok) { if (ok) C.purgePage(r.id).then(function () { toast('Removed', 'info'); load(); }, cloudError); }); } }, ['Remove for good']) : null
+            ])
           ]));
         });
-      }, function (e) { msg.textContent = e.message; });
+      }, function (e) { box.innerHTML = ''; box.appendChild(el('p', { class: 'small error', text: e.message })); });
     }
-    function add() {
-      msg.className = 'small'; msg.textContent = '';
-      if (!email.value.trim()) { email.focus(); return; }
-      C.share(projectId, email.value.trim(), role.value).then(function () { toast('Shared with ' + email.value.trim(), 'success'); email.value = ''; load(); }, function (e) { msg.className = 'small error'; msg.textContent = e.message; });
-    }
-    email.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); add(); } });
     load();
-    UI.modal({ title: 'Share "' + name + '"', body: el('div', {}, [
-      list,
-      el('div', { class: 'field', style: 'margin-top:14px' }, [el('span', { class: 'field__label', text: 'Add someone' }), el('div', { class: 'row' }, [email, role, el('button', { class: 'btn btn--primary', type: 'button', onclick: add }, ['Share'])])]),
-      msg,
-      el('p', { class: 'small muted', text: 'They need an account first: in Supabase, Authentication, Users, Add user. They then see the project on their Cloud screen and open it there.' })
-    ]), buttons: [{ label: 'Done', primary: true }] });
+    return el('div', { class: 'panel', id: 'deleted-pages' }, [el('h2', { text: 'Recently deleted pages' }), el('p', { class: 'small muted', text: 'Deleting a page only hides it. Anyone who can edit can bring it back here.' }), box]);
+  }
+  function shareDialog(projectId, name) {
+    UI.modal({ title: 'Share "' + name + '"', body: peoplePanel(projectId, true), buttons: [{ label: 'Done', primary: true }] });
   }
   function historyDialog() {
     var C = window.UOL_CLOUD, l = C.link(); if (!l) return;
     var box = el('div', {}, [el('p', { class: 'small muted', text: 'Loading…' })]);
-    var m = UI.modal({ title: 'Earlier copies of "' + l.name + '"', body: el('div', {}, [el('p', { class: 'small', text: 'The cloud keeps a copy of the project at most once an hour while it is being changed, the last 48 copies. Restoring one replaces the project for everyone (the current state becomes an earlier copy, so this can be undone).' }), box]), buttons: [{ label: 'Close' }] });
+    var m = UI.modal({ title: 'Earlier copies of "' + l.name + '"', body: el('div', {}, [el('p', { class: 'small', text: 'The cloud keeps a copy of the site settings and sections at most once an hour while they change (the last 48). Each page has its own hourly copies, on its Page tab under Versions. Copies marked "whole project" were made before pages were saved separately and put every page back too.' }), box]), buttons: [{ label: 'Close' }] });
     C.history(l.projectId).then(function (rows) {
       box.innerHTML = '';
-      if (!rows || !rows.length) { box.appendChild(el('p', { class: 'small muted', text: 'No earlier copies yet. The first is made an hour after the project is first changed.' })); return; }
+      if (!rows || !rows.length) { box.appendChild(el('p', { class: 'small muted', text: 'No earlier copies yet. The first is made an hour after the settings first change.' })); return; }
       rows.forEach(function (h) {
         box.appendChild(el('div', { class: 'rev' }, [
-          el('div', {}, [el('strong', { text: fmtTime(h.saved_at) }), el('div', { class: 'small muted', text: 'Version ' + h.version + (h.saved_by_email ? ' · last saved by ' + h.saved_by_email : '') })]),
+          el('div', {}, [el('strong', { text: fmtTime(h.saved_at) }), el('div', { class: 'small muted', text: (h.whole_project ? 'Whole project · ' : 'Settings and sections · ') + 'version ' + h.version + (h.saved_by_name ? ' · by ' + h.saved_by_name : '') })]),
           C.canEdit() ? el('button', { class: 'btn btn--sm', type: 'button', onclick: function () {
-            UI.confirm('Restore earlier copy', 'Replace "' + l.name + '" with the copy from ' + fmtTime(h.saved_at) + ', for everyone? A snapshot of this browser\'s copy is taken first.', 'Restore').then(function (ok) {
+            UI.confirm('Restore earlier copy', 'Put back the ' + (h.whole_project ? 'whole project' : 'site settings and sections') + ' from ' + fmtTime(h.saved_at) + ', for everyone? A snapshot of this browser\'s copy is taken first.', 'Restore').then(function (ok) {
               if (!ok) return;
               m.close();
               saveSnapshot('Before restoring the cloud copy from ' + fmtTime(h.saved_at)).then(function () { return C.restoreHistory(h.id); }).then(function () { App.undo = {}; App.redo = {}; App.page = null; toast('Restored the copy from ' + fmtTime(h.saved_at), 'success'); go('#pages'); }, cloudError);
@@ -2839,34 +3176,40 @@
       });
     }, function (e) { box.innerHTML = ''; box.appendChild(el('p', { class: 'error small', text: e.message })); });
   }
-  function changePasswordDialog() {
+  function changePasswordDialog(recovery) {
     var C = window.UOL_CLOUD;
     var a = el('input', { class: 'input', type: 'password', autocomplete: 'new-password', minlength: '8', 'aria-label': 'New password' });
     var b = el('input', { class: 'input', type: 'password', autocomplete: 'new-password', 'aria-label': 'New password again' });
     var msg = el('p', { class: 'small error', role: 'alert' });
-    UI.modal({ title: 'Change password', body: el('div', {}, [
+    UI.modal({ title: recovery ? 'Choose a new password' : 'Change password', body: el('div', {}, [
+      recovery ? el('p', { class: 'small', text: 'You are signed in from the link in your email. Choose a new password for next time.' }) : null,
       el('label', { class: 'field' }, [el('span', { class: 'field__label', text: 'New password (at least 8 characters)' }), a]),
       el('label', { class: 'field' }, [el('span', { class: 'field__label', text: 'New password again' }), b]),
       msg
-    ]), buttons: [{ label: 'Cancel' }, { label: 'Change password', primary: true, onClick: function (api) {
+    ]), buttons: [{ label: recovery ? 'Later' : 'Cancel' }, { label: 'Save password', primary: true, onClick: function (api) {
       if (a.value.length < 8) { msg.textContent = 'Use at least 8 characters.'; return false; }
       if (a.value !== b.value) { msg.textContent = 'The two passwords are different.'; return false; }
-      C.changePassword(a.value).then(function () { toast('Password changed', 'success'); if (api && api.close) api.close(); }, function (e) { msg.textContent = e.message; });
+      C.changePassword(a.value).then(function () { toast('Password saved', 'success'); if (api && api.close) api.close(); }, function (e) { msg.textContent = e.message; });
       return false;
     } }] });
+    setTimeout(function () { a.focus(); }, 30);
   }
 
   /* ================= help ================= */
   function helpView() {
     return el('div', { class: 'page-wrap page-wrap--narrow help' }, [
+      window.UOL_TOUR ? el('div', { class: 'panel help-tour' }, [
+        el('div', {}, [el('h2', { text: 'New here, or need a refresher?' }), el('p', { class: 'small muted', text: 'A two-minute tour of projects, importing, editing, review and working together.' })]),
+        el('button', { class: 'btn btn--primary', type: 'button', onclick: function () { startTour(false); } }, ['Watch the tour'])
+      ]) : null,
       el('div', { class: 'panel', html:
-        '<h2>What this is</h2><p>A local prototyping CMS that renders pages with the real University of Leeds design system (v1.0.22) stylesheet and scripts, so prototypes look and behave exactly like leeds.ac.uk. It runs in your browser from a folder of files; nothing is installed and nothing is sent anywhere.</p>' +
+        '<h2>What this is</h2><p>A prototyping CMS that renders pages with the real University of Leeds design system (v1.0.22) stylesheet and scripts, so prototypes look and behave exactly like leeds.ac.uk. It runs in your browser with nothing to install. With cloud saving set up, projects are stored in the University\'s Supabase project and shared with colleagues; without it, everything stays in this browser.</p>' +
         '<h2>Opening it</h2><p>Double-click <code>index.html</code>. That is all. (A local server, <code>serve.ps1</code>, is optional and only adds "import by URL"; the grabber extension covers that without a server.)</p>' +
         '<h2>Finding your way around</h2><p>The icons down the left edge switch between Pages, Media, Import, Save &amp; export, Cloud, Settings and Help (hover for the name). <strong>Settings</strong> holds the screens you need less often: Site (masthead, navigation, banners and footer), Theme (colours, fonts and custom CSS) and Components (every block with the current theme, and the component library for each kind of page). The bar across the top shows the current screen with its actions; in the editor it holds the page title, path, template and status, undo and redo, the preview width icons, the Preview / HTML switch, the save state dot, <strong>Open page</strong> and a <strong>&#8943;</strong> menu with versions, every export format, duplicate and delete.</p>' +
         '<h2>Editing</h2><ul><li><strong>Click</strong> a block in the preview to select it; a toolbar appears on its top edge with the block\'s name, move up/down, duplicate, delete and <strong>Add below</strong>. Drag the dotted handle at its left to move the block.</li><li><strong>Component libraries</strong>: each kind of page has its own. Homepages take the widgets and everything else; document pages take what the Jadu rich text editor offers. The inserter shows the page\'s library (<strong>Show them</strong> lists the rest), and Check page flags blocks from outside it. Change a library on Settings, Components.</li><li><strong>Hover</strong> a block in the preview and a red <strong>+</strong> appears on a dashed line below it (above it when you hover its top edge): click it to insert a block there. The red <strong>+</strong> in the top bar inserts below the selected block, or at the end. The inserter has search, category chips and your recently used blocks; Enter inserts the first match.</li><li><strong>Double-click text</strong> in the preview to edit it in place. Enter or clicking away saves; Esc cancels.</li><li><strong>Ctrl+click</strong> a link in the preview to follow it.</li><li>The <strong>HTML</strong> switch in the top bar shows the design-system markup of the page or the selected block, with Copy for Jadu.</li><li>The panel on the right is the <strong>inspector</strong>. <strong>Block</strong> lists the page\'s blocks (the outline) until you select one, then shows that block\'s fields; <strong>Page</strong> holds the heading, breadcrumb, banner, side column and versions; <strong>Section</strong> shows where the page sits, lets you step between the pages of its section, reorder them and change the generated navigation.</li><li><strong>Sections</strong> group pages: the side menu, contents list and previous/next links are generated from the pages in a section.</li><li><kbd>Esc</kbd> returns from a block to the outline.</li></ul>' +
         '<h2>Images</h2><p>Every image field has <strong>Library</strong>, <strong>Upload</strong> and placeholder buttons, and accepts a dropped file. The rich text toolbar has an Image button too. Images live in the Media library (browser database, and your project folder when linked), not inside the page, so the project stays small.</p>' +
-        '<h2>Saving</h2><p>The working copy lives in about 5 MB of browser storage. Save &amp; export shows what uses it; the CMS warns when it is 70% and 90% full, and <strong>Free up space</strong> removes older page versions or the originals of finished pages. Snapshots and images are kept in the browser\'s database, which has far more room.</p><p>Autosave is always on. For safety, <strong>link a project folder</strong> (Save &amp; export): project.json and images are written there after every change. You can also save <strong>versions</strong> of a page (Ctrl+S), take whole-project <strong>snapshots</strong>, and <strong>save a project file</strong> (Ctrl+Shift+S).</p>' +
-        '<h2>Cloud and sharing</h2><p>Once cloud saving is set up (see <code>DEPLOY.md</code>), the <strong>Cloud</strong> screen lets you sign in, upload this project, and share it with colleagues to view or edit. Changes are saved here first and uploaded a few seconds later; colleagues\' changes arrive every minute. Different pages edited at the same time are merged; if two people change the same page, the more recent edit is kept and the other person is told. The chip next to <strong>Saved</strong> in the top bar shows the cloud state, and <strong>Earlier copies</strong> on the Cloud screen restores an hourly cloud copy.</p>' +
+        '<h2>Saving</h2><p>Autosave is always on. Each project you open is kept in this browser\'s database, which has room for large projects, so pages open straight away and you can keep working through a dropped connection. With accounts, every change is also saved to the cloud a few seconds later. Save &amp; export shows what a project takes; <strong>Free up space</strong> removes older page versions or the originals of finished pages.</p><p>Autosave is always on. For safety, <strong>link a project folder</strong> (Save &amp; export): project.json and images are written there after every change. You can also save <strong>versions</strong> of a page (Ctrl+S), take whole-project <strong>snapshots</strong>, and <strong>save a project file</strong> (Ctrl+Shift+S).</p>' +
+        '<h2>Accounts, projects and sharing</h2><p>With cloud saving set up (see <code>DEPLOY.md</code>), everyone signs in with their own account; create one with your University email address. <strong>Projects</strong> lists your projects and the ones shared with you: start a new one, bring one in from a project file, or open one to work on it. The account button at the foot of the left-hand bar changes your name or password, replays the tour and signs you out.</p><p><strong>Sharing</strong> lists who is on the project. The owner adds people as editors or viewers; colleagues without an account are invited and join when they sign up. Each page is saved on its own a few seconds after a change, and colleagues\' changes arrive within seconds. If two people edit the same page, changes to different blocks are merged; only when both change the same block is the later edit kept, and the other person is told. The cloud keeps hourly copies of every page (Page tab, Versions) and of the site settings (Sharing). Deleted pages can be brought back from <strong>Recently deleted</strong> on the Pages screen.</p><p><strong>Working together</strong>: the initials of colleagues in the project show in the top bar, next to the pages they have open, and on the block they picked in the preview. When someone else has your page open, the editor says so.</p>' +
         '<h2>Review and sign-off</h2><ul><li><strong>Changes</strong> in the editor\'s top bar lists everything changed since the original leeds.ac.uk page: blocks added, removed, edited and moved, with the text differences marked. Imported pages keep an untouched copy of the original for this; for other pages, fetch the live page or use the page as it is now. <strong>Word</strong> and <strong>PDF</strong> turn it into a change list for whoever edits the page in Jadu. Save &amp; export has change lists for every page.</li><li>The <strong>Review</strong> tab in the inspector checks the page (alt text, heading levels, link text, links to missing pages and other websites), shows the sign-off status and holds comments. Click a block in the preview while on the Review tab to comment on that block.</li><li><strong>Sign-off</strong>: <strong>Send for review</strong> marks the page as in review, so anyone the project is shared with can approve it or request changes. In the same step it makes a review link for reviewers without an account, or updates the page\'s existing links so they show the latest version. Each step records who and when, and the tab says if the page was edited after it was approved. Sign-off and comments are saved in the cloud.</li><li><strong>Review links</strong> give reviewers without an account a read-only copy of a page, a section or the whole project. Each page\'s Review tab lists the links that include it and says when one shows an older version; <strong>Update</strong> fixes that and keeps the link. Make one with Send for review, <strong>New review link</strong> on the Review tab, the editor &#8943; menu or the Cloud screen, which lists every link. Reviewers can comment with their name, on the page or on a part they pick; their comments appear on the Review tab. If you tick it when making the link, reviewers can also approve or ask for changes, with their name and role; that is recorded in the sign-off history like the team\'s. Switch comments and approvals for a link on or off in its &#8943; menu.</li><li><strong>Jadu checklist</strong>: in Changes, whoever updates Jadu ticks each change off as it is made. Progress shows in the bar and on the Pages screen; a change edited again after it was ticked is marked so. Change lists in Word and PDF have tick boxes.</li><li><strong>Live updates</strong>: with the cloud, comments, sign-off, ticks and colleagues\' saves arrive within seconds. <strong>Email notifications</strong> are optional (DEPLOY.md, part 7); choose yours on the Cloud screen.</li></ul>' +
         '<h2>Keyboard shortcuts</h2><ul><li><kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Y</kbd> undo / redo (outside text fields)</li><li><kbd>/</kbd> open the block inserter (outside text fields)</li><li><kbd>Ctrl</kbd>+<kbd>K</kbd> insert a link while editing rich text</li><li><kbd>Ctrl</kbd>+<kbd>S</kbd> save a version of the page</li><li><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd> save the project to file</li><li><kbd>Esc</kbd> close dialogs / cancel in-place editing</li></ul>' +
         '<h2>Linking pages</h2><p>Give links the path of another page in this project (for example <code>/about</code>) and they navigate between pages in the viewer and in HTML exports.</p>' +
@@ -2877,13 +3220,12 @@
 
   /* ================= boot ================= */
   function boot() {
-    App.data = Store.load();
     App.lastSaved = new Date();
-    buildRail();
     document.head.appendChild(el('style', { text: RV.css }));
     document.addEventListener('keydown', function (e) {
       var tag = (e.target.tagName || '').toLowerCase();
       var typing = tag === 'input' || tag === 'textarea' || tag === 'select' || e.target.isContentEditable;
+      if (!Store.data) return;
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 's') { e.preventDefault(); saveProjectToFile(false); return; }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); if (App.page) saveVersion(); else saveProjectToFile(false); return; }
       if (typing) return;
@@ -2897,38 +3239,112 @@
     document.addEventListener('mousedown', function () { if (Preview.iframe && Preview.ready) Preview.iframe.contentWindow.postMessage({ uolcms: 'commitInline' }, '*'); }, true);
     window.addEventListener('hashchange', function () { if (App.page) App.lastEditedPage = App.page.id; route(); });
     window.addEventListener('beforeunload', function () { if (App.dirty) saveNow(); });
+    document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'hidden') { if (App.dirty) saveNow(); Store.flush(); } });
+    Store.onError = function () { updateSaveStatus(); showBanner('warn', ['The latest change could not be saved in this browser. Free up space, then keep editing.'], [{ label: 'Free up space', primary: true, onClick: freeSpaceDialog }]); };
+    setupCloud();
+    var C = window.UOL_CLOUD;
+    M.open().then(function () {
+      Store.quota();
+      if (navigator.storage && navigator.storage.persist) navigator.storage.persisted().then(function (p) { if (!p) navigator.storage.persist(); }).catch(function () {});
+      return migrateSnapshots();
+    }).then(function () {
+      if (C && C.configured()) return startCloud();
+      return startLocal();
+    }).catch(function (e) { App.mode = App.mode || 'local'; toast('Could not start: ' + (e && e.message || e), 'error', 9000); route(); });
+  }
+  /* without cloud saving: one project, kept in this browser (and a linked folder or project file) */
+  function startLocal() {
+    App.mode = 'local';
+    buildRail();
+    return Store.openLocal().then(function () {
+      App.data = Store.data;
+      afterProjectOpen();
+      return reconnectFolder();
+    }).then(function (connected) {
+      route(); updateSaveStatus();
+      if (!connected) backupReminder();
+    });
+  }
+  /* with cloud saving: sign in first, then the project worked on last time (or the Projects screen) */
+  function startCloud() {
+    var C = window.UOL_CLOUD;
+    App.mode = 'cloud';
+    return C.consumeRedirect().then(function (back) {
+      App.authReturn = back;
+      buildRail();
+      C.loadDomains();
+      if (!C.user()) { route(); return; }
+      return signedInStart();
+    });
+  }
+  function signedInStart() {
+    var C = window.UOL_CLOUD, back = App.authReturn; App.authReturn = null;
+    buildRail();
+    return C.profile().catch(function () { return null; }).then(function (prof) {
+      buildRail();
+      if (back && back.type === 'recovery') setTimeout(function () { changePasswordDialog(true); }, 300);
+      else if (back && back.type === 'signup') toast('Email confirmed. Welcome!', 'success', 4000);
+      var deep = /^#open\//.test(location.hash), last = C.lastProject();
+      var opened = !deep && last && last.projectId ? openCloud(last.projectId, last.role, last.name, true).catch(function () { return false; }) : Promise.resolve(false);
+      return opened.then(function (ok) {
+        if (!ok && !deep && location.hash !== '#projects') go('#projects'); else route();
+        if (prof && !prof.onboarded) setTimeout(function () { startTour(true); }, 600);
+      });
+    });
+  }
+  /* things to tidy in a project when it opens */
+  function afterProjectOpen() {
     var dupes = migrateSideColumnDupes();
     if (dupes) toast('Removed ' + dupes + ' duplicated side-column item' + (dupes === 1 ? '' : 's') + ' left by an earlier import', 'success', 6000);
-    setupCloud();
-    M.open().then(function () {
-      if (navigator.storage && navigator.storage.persist) navigator.storage.persisted().then(function (p) { if (!p) navigator.storage.persist(); }).catch(function () {});
-      return migrateSnapshots().then(function () { return migrateDataUrls(); }).then(function (n) { if (n) toast(n + ' embedded image' + (n === 1 ? '' : 's') + ' moved out of the page content into the Media library', 'success', 6000); });
-    }).then(function () { return reconnectFolder(); }).then(function (connected) {
-      route();
-      updateSaveStatus();
-      var C = window.UOL_CLOUD;
-      if (C && C.link()) { if (C.user() && C.configured()) afterSignIn(); else renderCloudChip(); }
-      else if (!connected) backupReminder();
-    }, function () { route(); updateSaveStatus(); });
+    migrateDataUrls().then(function (n) { if (n) toast(n + ' embedded image' + (n === 1 ? '' : 's') + ' moved out of the page content into the Media library', 'success', 6000); });
   }
-  /* how the editor reacts to the cloud: status in the top bar, colleagues' changes, images arriving */
+  /* open a cloud project in this browser. quiet: no toasts (used when carrying on from last time) */
+  function openCloud(id, role, name, quiet) {
+    var C = window.UOL_CLOUD;
+    if (App.dirty) saveNow();
+    App.undo = {}; App.redo = {}; App.page = null; App.review = null; App.reviewSummary = {}; App.jadu = null;
+    if (!quiet) toast('Opening "' + (name || 'project') + '"…', 'info', 2000);
+    return C.openProject(id, role, name).then(function (r) {
+      App.data = Store.data;
+      afterProjectOpen(); buildRail();
+      if (r && r.tookOver) toast('The work this browser kept from before accounts is now part of "' + (name || 'the project') + '"', 'success', 6000);
+      return true;
+    }, function (e) { if (!quiet) cloudError(e); throw e; });
+  }
+  /* links in emails: #open/<project>/<page> */
+  function openFromLink(projectId, pageId) {
+    var C = window.UOL_CLOUD, l = C.link();
+    var then = function () { go(pageId && Store.getPage(pageId) ? '#edit/' + pageId : '#pages'); };
+    if (l && l.projectId === projectId && Store.data) { then(); return; }
+    C.listProjects().then(function (rows) {
+      var r = (rows || []).filter(function (x) { return x.id === projectId; })[0];
+      if (!r) { toast('That project is not shared with you, or no longer exists', 'warn', 6000); go('#projects'); return; }
+      return openCloud(r.id, r.role, r.name).then(then);
+    }).catch(function (e) { cloudError(e); go('#projects'); });
+  }
+  /* how the editor reacts to the cloud: status in the top bar, colleagues' changes, images arriving, who is where */
   function setupCloud() {
     var C = window.UOL_CLOUD; if (!C) return;
     C.on(function () { var s = document.getElementById('cloud-current-status'); if (s) s.textContent = cloudStatusText(); });
     C.setHooks({
       onStatus: function () { renderCloudChip(); var s = document.getElementById('cloud-current-status'); if (s) s.textContent = cloudStatusText(); },
+      onSignedOut: function () { if (cloudMode()) { Store.close(); buildRail(); toast('You have been signed out. Sign in again to carry on; your changes are kept in this browser.', 'warn', 8000); route(); } },
       onApplied: function (info) {
-        if (info.lost) { toast(info.message, 'warn', 9000); route(); return; }
-        if (info.conflicts && info.conflicts.length) toast('A colleague changed ' + info.conflicts.join(', ') + ' at the same time as you. The most recent edit was kept; earlier copies are on the Cloud screen.', 'warn', 9000);
+        if (info.lost) { toast(info.message, 'warn', 9000); Store.close(); buildRail(); go('#projects'); return; }
+        if (info.conflicts && info.conflicts.length) toast('A colleague changed ' + info.conflicts.slice(0, 3).join(', ') + (info.conflicts.length > 3 ? ' and more' : '') + ' at the same time as you. The most recent edit was kept; hourly copies can bring the other back.', 'warn', 10000);
         var v = App.view;
         if (v === 'edit' && App.page) {
-          if (info.pages.indexOf(App.page.id) !== -1) {
-            delete App.undo[App.page.id]; delete App.redo[App.page.id];
-            toast(Store.getPage(App.page.id) ? 'A colleague updated this page; showing their version' : 'A colleague deleted this page', 'info', 6000);
-            route();
-          } else if (info.site || info.sections) reloadPreview(true);
-        } else if (v === 'pages' || v === 'cloud' || ((v === 'site' || v === 'theme') && info.site)) route();
-        else if (info.pages.length || info.sections) toast('Colleagues\' changes brought in from the cloud', 'info', 3000);
+          var id = App.page.id;
+          if ((info.removed || []).indexOf(id) !== -1) { toast('A colleague deleted this page. It can be restored from Recently deleted on the Pages screen.', 'warn', 8000); go('#pages'); return; }
+          if ((info.pages || []).indexOf(id) !== -1) {
+            // their changes go straight into the open page; what you are typing is kept (it was merged)
+            App.page = Store.getPage(id); Preview.page = App.page;
+            delete App.undo[id]; delete App.redo[id]; recordBaseline();
+            if (App.selectedBlock && !findBlock(App.selectedBlock)) App.selectedBlock = null;
+            renderEditorSide(); syncTopFields(); reloadPreview(true);
+          } else if (info.site || info.sections || (info.added || []).length) reloadPreview(true);
+          renderSwitcher();
+        } else if (v === 'pages' || v === 'sharing' || ((v === 'site' || v === 'theme' || v === 'library') && info.site)) route();
       },
       /* a colleague commented, signed off or ticked a Jadu change: refresh just that */
       onLive: function (info) {
@@ -2937,10 +3353,11 @@
         if (App.view === 'edit' && App.page && (!info.pageId || info.pageId === App.page.id)) { if (info.kind === 'jadu') loadJadu(true); else loadReview(true); }
         else if (App.view === 'pages') fillSignoffChips(document.getElementById('app'));
       },
-      onMedia: function (n) {
+      onMedia: function () {
         if (App.view === 'edit' || App.view === 'site' || App.view === 'theme') reloadPreview(true);
         else if (App.view === 'media') route();
-      }
+      },
+      onPresence: function (people) { App.people = people; renderPresence(); }
     });
   }
   document.addEventListener('DOMContentLoaded', boot);

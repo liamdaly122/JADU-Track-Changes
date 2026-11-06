@@ -21,11 +21,11 @@
   <script>
     (function () {
       var Store = window.UOL_STORE;
-      Store.load();
       var frame = document.createElement('iframe');
       frame.title = 'Prototype page';
       document.body.appendChild(frame);
       function render() {
+        if (!Store.data) { document.body.innerHTML = '<p class="nopage">No project is open. Open <a href="index.html">the CMS</a> and choose one.</p>'; return; }
         var slug = location.hash.replace(/^#\/?/, '') || (Store.data.pages[0] && Store.data.pages[0].slug);
         var page = Store.getPageBySlug(slug) || Store.data.pages[0];
         if (!page) { document.body.innerHTML = '<p class="nopage">No pages in the project. Open <a href="index.html">the CMS</a> to create one.</p>'; return; }
@@ -37,8 +37,11 @@
         if (d.uolcms === 'navigate') { location.hash = '#/' + d.slug; }
       });
       window.addEventListener('hashchange', render);
-      window.addEventListener('storage', function (e) { if (e.key === 'leeds-cms:v1') { Store.load(); render(); } });
-      window.UOL_MEDIA.open().then(render, render);
+      // the project the CMS has open, from the browser's database; it reloads when the CMS saves
+      var key = Store.openKey() || 'local';
+      function load() { return Store.open(key).then(function (found) { if (!found && key === 'local') { var old = Store.legacy(); if (old) Store.data = old; } }); }
+      try { new BroadcastChannel('leeds-cms').onmessage = function (e) { if (e.data && e.data.saved === key) load().then(render); }; } catch (e) {}
+      window.UOL_MEDIA.open().then(load).then(render, render);
     })();
   </script>
 </body>

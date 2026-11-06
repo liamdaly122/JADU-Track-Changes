@@ -4,7 +4,21 @@ A local, browser-based CMS that renders pages with the **real University of Leed
 
 It is **not a native app and there is nothing to install**: it is a folder of HTML, CSS and JavaScript that runs in Edge or Chrome. Your work lives in the browser and, once you link a project folder, on disk. Nothing is sent to any server unless you switch on the optional cloud saving.
 
-**Online and shared (optional).** The same folder can be published as a website (GitHub and Vercel) with sign-in, projects saved online and sharing with colleagues (Supabase). Everything is done in the browser; follow [DEPLOY.md](DEPLOY.md).
+**Online and shared (optional).** The same folder can be published as a website (GitHub and Vercel) with accounts, projects saved online and colleagues working on them together (Supabase). Everything is done in the browser; follow [DEPLOY.md](DEPLOY.md).
+
+## Accounts, projects and working together
+
+With cloud saving set up, the CMS shows only a sign-in screen until someone signs in. **Create an account** with a University email address (other addresses are refused unless the domain is added in Supabase); a short animated **tour** runs the first time, and can be replayed from **Help** or the account button (your initials at the foot of the left-hand bar), which also changes your name or password and signs you out. Links in confirmation and password emails come back to the CMS and are read automatically.
+
+**Projects** (the folder icon at the top of the rail) lists your projects and the ones shared with you: start one (empty or with example pages), turn a project file into one, open, rename, share, leave or delete. The CMS remembers the project you worked on last. Work kept in a browser by an older version is offered as a project, or folded into its cloud project when that is opened.
+
+**Saving.** Each project you open is kept in the browser's database (no 5 MB limit), so it opens straight away and carries on through a dropped connection. Every change is saved to the cloud about two seconds later, page by page. If someone saved the same page in between, the CMS merges the two **block by block**: changes to different blocks are both kept, and only when both people change the same block does the later edit win (the other person is told). The cloud keeps hourly copies of each page (Page tab, Versions) and of the site settings and sections (Sharing), and deleted pages can be restored from **Recently deleted** on the Pages screen.
+
+**Sharing** (share icon) lists who is on the project. The owner adds people as editors or viewers; someone without an account is **invited** and joins as soon as they sign up with that address. Viewers see the project but their changes are not saved.
+
+**Who is where.** Colleagues in the project show as initials in the top bar, next to the pages they have open on the Pages screen, and on the block they picked in the preview, in their colour. When someone else has your page open, the editor says so.
+
+Without cloud saving (for example `index.html` opened from a folder) the CMS works as before on one project kept in the browser, with no sign-in.
 
 ## Loading the CMS
 
@@ -14,7 +28,7 @@ The optional local server (`serve.ps1`, port 8765) only adds one thing, importin
 
 ## Keeping your work safe
 
-Everything is autosaved to browser storage instantly, but a managed browser can be reset, so use one of these as well (both are on the **Save & export** screen):
+Everything is autosaved to the browser's database instantly (and, with accounts, to the cloud). Without cloud saving, a managed browser can be reset, so use one of these as well (both are on the **Save & export** screen):
 
 1. **Link a project folder (recommended).** Pick a folder, for example inside OneDrive. The CMS writes `project.json` and a `media` folder with your images there after every change. Next time you open the CMS it asks you to reconnect with one click. If the folder's copy is newer than the browser's (for example on another computer) it offers to load it.
 2. **Project files.** *Save project to file* writes one `.json` containing pages, site settings, sections and images; once saved, it is kept up to date automatically while the tab is open (Ctrl+Shift+S saves on demand). *Open project file* restores it anywhere.
@@ -34,7 +48,8 @@ Screens are reached from the icon rail down the left edge (hover an icon for its
 | **Media** | The image library: upload, drop files, see where each image is used, delete. |
 | **Import** | Grabber (recommended), pasted HTML, saved file, or URL (server only). |
 | **Save & export** | Project folder, project files, snapshots, per-page exports, whole-site ZIP. |
-| **Cloud** | Only once cloud saving is set up ([DEPLOY.md](DEPLOY.md)): sign in, upload this project, open or share cloud projects, restore earlier cloud copies. |
+| **Projects** | With cloud saving: your projects and the ones shared with you (see above). |
+| **Sharing** | With cloud saving: people on the project and invitations, review links, email choices, earlier copies of the settings, recently deleted pages. Without it, the **Cloud** screen explains how to set cloud saving up. |
 | **Settings** (gear icon, foot of the rail) | Links to the three screens used less often: |
 | &nbsp;&nbsp;**Site** | Global masthead and quicklinks, local masthead, main navigation, global and marketing banners, footer. |
 | &nbsp;&nbsp;**Theme** | Every brand colour token, font stacks, base font size, custom CSS, presets. Updates the preview live. |
@@ -123,15 +138,15 @@ Images from leeds.ac.uk appear in PNG and PDF exports when the CMS has them: the
 
 **Jadu checklist** (Changes view, needs the cloud). Whoever makes the changes in Jadu ticks each item off as they go: the tick records who and when, the bar shows "3 of 7 done in Jadu", **Hide done** leaves only what is left, and the Pages table shows each page's progress. If a ticked change is edited again in the CMS, its tick is marked *Edited since ticked* and stops counting. Word and PDF change lists have tick boxes, filled in for what is done.
 
-**Live updates** (needs the cloud). Comments, sign-off, Jadu ticks and colleagues' saves arrive within seconds through Supabase Realtime; the Cloud screen says "live updates on". If the connection drops, the CMS reconnects, and the once-a-minute check carries on regardless.
+**Live updates** (needs the cloud). Comments, sign-off, Jadu ticks and colleagues' saves arrive within seconds through Supabase Realtime; the Sharing screen says "live updates on". If the connection drops, the CMS reconnects, and the once-a-minute check carries on regardless.
 
-**Email notifications** (optional, see DEPLOY.md part 7). Emails when a page is sent for review, approved or sent back, and when someone comments, sent by Supabase through Resend. Each person chooses on the Cloud screen, per project.
+**Email notifications** (optional, see DEPLOY.md part 7). Emails when a page is sent for review, approved or sent back, and when someone comments, sent by Supabase through Resend. Each person chooses on the Sharing screen, per project.
 
-**Review links** (Send for review, Review tab, editor ⋯ menu or Cloud screen; owners and editors). A read-only copy of a page, its section or the whole project that anyone with the link can open without an account (`review.html#<code>/<page>`). Each page's Review tab lists the links that include it, and says when a link shows an older version of the page; the Cloud screen lists them all. The copy does not change when the project does; **Update** replaces it with the latest version and keeps the link, **Delete** (in the link's ⋯ menu) stops the link working. Images are copied to a public storage folder named after the link's 64-character code, so only people with the link can find them.
+**Review links** (Send for review, Review tab, editor ⋯ menu or Sharing screen; owners and editors). A read-only copy of a page, its section or the whole project that anyone with the link can open without an account (`review.html#<code>/<page>`). Each page's Review tab lists the links that include it, and says when a link shows an older version of the page; the Sharing screen lists them all. The copy does not change when the project does; **Update** replaces it with the latest version and keeps the link, **Delete** (in the link's ⋯ menu) stops the link working. Images are copied to a public storage folder named after the link's 64-character code, so only people with the link can find them.
 
-Reviewers can **comment through the link** unless it was made with comments off (or they are turned off later on the Cloud screen). They give their name, then comment on the page or click **Pick a part** and click the part of the page the comment is about. Their comments appear on the Review tab, marked with the reviewer's name and the link they came through, and resolving or deleting works as for any comment. Reviewers see only comments made through the same link, never the team's own. A link takes at most 60 comments an hour, to stop abuse. The reviewer's name (and role) is the only thing the review page keeps in their browser.
+Reviewers can **comment through the link** unless it was made with comments off (or they are turned off later on the Sharing screen). They give their name, then comment on the page or click **Pick a part** and click the part of the page the comment is about. Their comments appear on the Review tab, marked with the reviewer's name and the link they came through, and resolving or deleting works as for any comment. Reviewers see only comments made through the same link, never the team's own. A link takes at most 60 comments an hour, to stop abuse. The reviewer's name (and role) is the only thing the review page keeps in their browser.
 
-Reviewers can also **approve or ask for changes through the link**, for stakeholders without an account. This is off unless you tick *Let reviewers approve or ask for changes* when making the link, or switch it on later in the link's ⋯ menu on the Cloud screen. The reviewer gives their name and, optionally, their role; asking for changes needs a note. The step is recorded in the page's sign-off history like the team's own, shown as, for example, "Approved · Prof A Smith, Dean of Faculty (reviewer)", and emails go out as for any sign-off. The approval is of the page exactly as the link showed it: if the link's copy was older than the page, or the page is edited afterwards, the Review tab says *Edited since it was approved*. Each link takes at most 20 sign-offs an hour, and reviewers see only the sign-offs made through the same link.
+Reviewers can also **approve or ask for changes through the link**, for stakeholders without an account. This is off unless you tick *Let reviewers approve or ask for changes* when making the link, or switch it on later in the link's ⋯ menu on the Sharing screen. The reviewer gives their name and, optionally, their role; asking for changes needs a note. The step is recorded in the page's sign-off history like the team's own, shown as, for example, "Approved · Prof A Smith, Dean of Faculty (reviewer)", and emails go out as for any sign-off. The approval is of the page exactly as the link showed it: if the link's copy was older than the page, or the page is edited afterwards, the Review tab says *Edited since it was approved*. Each link takes at most 20 sign-offs an hour, and reviewers see only the sign-offs made through the same link.
 
 ## Folder layout
 
@@ -145,7 +160,8 @@ leeds-cms/
   assets/ds/              design system assets (tokenised style.css, original, bundle.js, images)
   assets/cms/             CMS code: blocks.js (component registry), render.js, importer.js, exporter.js,
                           media.js, app.js, forms.js, store.js, seed.js, review.js (change lists and page checks),
-                          cloud.js and cloud-config.js (cloud saving, sign-off, comments, review links)
+                          cloud.js and cloud-config.js (accounts, projects, page-by-page saving, presence,
+                          sign-off, comments, review links), tour.js (the tour)
   assets/vendor/          html2canvas (PNG export)
   grabber/grabber.js      the page grabber; grabber/bookmarklet.html is the no-install version
   chrome-extension/       unpacked Chrome/Edge extension (manifest, background, grabber, icons)
