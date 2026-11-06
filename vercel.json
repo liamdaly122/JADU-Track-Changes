@@ -3,6 +3,12 @@
   "rewrites": [
     { "source": "/__proxy", "destination": "/api/proxy" }
   ],
+  "functions": {
+    "api/keepalive.js": { "includeFiles": "assets/cms/cloud-config.js" }
+  },
+  "crons": [
+    { "path": "/api/keepalive", "schedule": "23 5 * * *" }
+  ],
   "headers": [
     {
       "source": "/(.*)",
