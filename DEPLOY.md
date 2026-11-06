@@ -212,8 +212,8 @@ Running the file again is safe: it only adds what is missing and keeps every pro
 Then, in the editor:
 
 - **Changes** in the top bar lists what changed since the original leeds.ac.uk page, with **Word** and **PDF** change lists for Jadu.
-- The **Review** tab on the right checks the page, and holds sign-off and comments.
-- **Share a review link** in the ⋯ menu makes a read-only link for reviewers without an account, who can comment with their name, and approve or ask for changes if you allow it. Manage links on the **Cloud** screen.
+- The **Review** tab on the right checks the page, and holds sign-off, comments and the page's review links.
+- **Send for review** on the Review tab marks the page as in review for the team and, in the same step, makes a read-only review link for reviewers without an account (or updates the page's existing one). Reviewers can comment with their name, and approve or ask for changes if you allow it. Every link is also listed on the **Cloud** screen.
 
 ---
 
@@ -260,7 +260,7 @@ If emails do not arrive, the **Logs** page in Resend shows what it received, and
 | Everything stopped working after a quiet week | The free Supabase project paused. Open the Supabase dashboard and click **Restore project**. Then check the daily keep-alive job: in Vercel, open the project, **Settings**, **Cron Jobs**. It should list `/api/keepalive`; **View logs** shows each run, and a run that says `"ok":true` reached the database. |
 | Import by URL fails online | Only leeds.ac.uk addresses are allowed. Use the grabber or paste the HTML for anything else. |
 | "The cloud database needs an update for this feature" | Run the whole of `supabase/setup.sql` again (Part 6). |
-| A review link says it does not work | The link was deleted, or only part of it was copied. Copy it again from the Cloud screen. |
+| A review link says it does not work | The link was deleted, or only part of it was copied. Copy it again from the page's Review tab or the Cloud screen. |
 | "Browser storage is …% full" | Click **Free up space**: remove older page versions, or the originals of finished pages. Save & export shows what takes the room. |
 | The Cloud screen never says "live updates on" | Nothing is lost: colleagues' changes still arrive within a minute. Check Realtime is enabled for the project in Supabase (Project Settings). |
 | No notification emails | See the end of part 7. |

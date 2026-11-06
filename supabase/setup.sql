@@ -532,15 +532,18 @@ begin
   update public.share_links set allow_approvals = p_allow where token = p_token;
 end $$;
 
--- the links of a project, for its owner and editors (without the copies themselves)
+-- the links of a project, for its owner and editors (without the copies themselves). page_hashes maps each page id in
+-- the copy to its version fingerprint, so the editor can list a page's links and say when one shows an older version
 drop function if exists public.share_link_list(uuid);
 create function public.share_link_list(p_project uuid)
 returns table (token text, name text, scope text, created_at timestamptz, updated_at timestamptz, created_by_email text, page_count integer,
-               allow_comments boolean, guest_comments integer, allow_approvals boolean, guest_signoffs integer)
+               allow_comments boolean, guest_comments integer, allow_approvals boolean, guest_signoffs integer, page_hashes jsonb)
 language sql stable security definer set search_path = public, auth as $$
   select s.token, s.name, s.scope, s.created_at, s.updated_at, u.email::text, coalesce(jsonb_array_length(s.data -> 'pages'), 0),
          s.allow_comments, (select count(*)::integer from public.page_comments c where c.share_token = s.token),
-         s.allow_approvals, (select count(*)::integer from public.page_signoffs o where o.share_token = s.token)
+         s.allow_approvals, (select count(*)::integer from public.page_signoffs o where o.share_token = s.token),
+         (select coalesce(jsonb_object_agg(e ->> 'id', coalesce(e ->> 'hash', '')), '{}'::jsonb)
+            from jsonb_array_elements(coalesce(s.data -> 'pages', '[]'::jsonb)) e where e ->> 'id' is not null)
     from public.share_links s left join auth.users u on u.id = s.created_by
    where s.project_id = p_project and public.can_edit_project(p_project)
    order by s.created_at desc;
