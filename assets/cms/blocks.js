@@ -775,8 +775,47 @@
     return !!spec.inline;
   }
 
+  /* ---------- component libraries: what each kind of page can hold ----------
+     Homepages take the widgets as well as everything else. Document pages take what the Jadu rich text editor
+     offers, since that is all a Jadu document page holds. Articles keep the blocks designed for them.
+     A project can add or remove components from a library (site.libraries[template] = { on: [], off: [] });
+     storing only the changes means new components still arrive in the libraries they belong to. */
+  var TEMPLATES = { homepage: 'Homepage', document: 'Document page', article: 'Article' };
+  var LIBRARY_DEFAULTS = {
+    document: ['rich-text', 'heading', 'paragraph', 'list', 'blockquote', 'pull-quote', 'text-highlight', 'highlight-block', 'in-text-cta', 'in-text-facts',
+      'accordion', 'table', 'image', 'button', 'arrow-link', 'linked-list', 'status-message', 'raw-html']
+  };
+  function defaultLibrary(template) {
+    if (LIBRARY_DEFAULTS[template]) return Object.keys(B).filter(function (k) { return LIBRARY_DEFAULTS[template].indexOf(k) !== -1; });
+    return Object.keys(B).filter(function (k) { return (B[k].scope || []).indexOf(template) !== -1; });
+  }
+  function library(template, site) {
+    var d = defaultLibrary(template), c = site && site.libraries && site.libraries[template];
+    if (!c) return d;
+    var on = c.on || [], off = c.off || [];
+    return Object.keys(B).filter(function (k) { return (d.indexOf(k) !== -1 && off.indexOf(k) === -1) || on.indexOf(k) !== -1; });
+  }
+  /* switch one component in or out of a library, keeping only the differences from the default */
+  function setInLibrary(site, template, type, include) {
+    var libs = site.libraries || (site.libraries = {}), c = libs[template] || (libs[template] = { on: [], off: [] });
+    c.on = (c.on || []).filter(function (k) { return k !== type; }); c.off = (c.off || []).filter(function (k) { return k !== type; });
+    var byDefault = defaultLibrary(template).indexOf(type) !== -1;
+    if (include && !byDefault) c.on.push(type);
+    if (!include && byDefault) c.off.push(type);
+    if (!c.on.length && !c.off.length) delete libs[template];
+    if (!Object.keys(libs).length) delete site.libraries;
+  }
+
   window.UOL_BLOCKS = {
     registry: B,
+    templates: TEMPLATES,
+    libraries: {
+      defaults: defaultLibrary,
+      of: library,
+      set: setInLibrary,
+      customised: function (site, template) { return !!(site && site.libraries && site.libraries[template]); },
+      reset: function (site, template) { if (site.libraries) { delete site.libraries[template]; if (!Object.keys(site.libraries).length) delete site.libraries; } }
+    },
     groups: GROUP_ORDER,
     components: C,
     placeholders: PLACEHOLDERS,

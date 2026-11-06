@@ -892,7 +892,11 @@
     var slugInput = el('input', { class: 'input input--slug', type: 'text', value: page.slug, 'aria-label': 'Page path' });
     slugInput.addEventListener('change', function () { page.slug = Store.uniqueSlug(slugInput.value || page.title, page.id); slugInput.value = page.slug; markDirty(); });
     var tplSel = el('select', { class: 'input input--sm', 'aria-label': 'Template' }, [['homepage', 'Homepage'], ['document', 'Document page'], ['article', 'Article']].map(function (o) { var opt = el('option', { value: o[0], text: o[1] }); if (page.template === o[0]) opt.selected = true; return opt; }));
-    tplSel.addEventListener('change', function () { page.template = tplSel.value; markDirty(); pushUndo(); renderEditorSide(); reloadPreview(); });
+    tplSel.addEventListener('change', function () {
+      page.template = tplSel.value; markDirty(); pushUndo(); renderEditorSide(); reloadPreview();
+      var n = outsideLibrary(page).length;
+      if (n) toast(n + ' block' + (n === 1 ? ' is' : 's are') + ' not in the ' + templateName(page.template) + ' library. Check page on the Review tab lists ' + (n === 1 ? 'it' : 'them') + '.', 'warn', 7000);
+    });
     var statusSel = el('select', { class: 'input input--sm', 'aria-label': 'Status' }, [['draft', 'Draft'], ['published', 'Published']].map(function (o) { var opt = el('option', { value: o[0], text: o[1] }); if (page.status === o[0]) opt.selected = true; return opt; }));
     statusSel.addEventListener('change', function () { page.status = statusSel.value; markDirty(); });
     App.topFields = { title: titleInput, slug: slugInput, tpl: tplSel, status: statusSel };
@@ -1173,18 +1177,26 @@
   function recentBlocks() { try { return JSON.parse(localStorage.getItem(RECENT_KEY) || '[]'); } catch (e) { return []; } }
   function rememberBlock(type) { var r = recentBlocks().filter(function (t) { return t !== type; }); r.unshift(type); try { localStorage.setItem(RECENT_KEY, JSON.stringify(r.slice(0, 6))); } catch (e) {} }
   /* opts: afterId (insert below that block), beforeId (insert above), at (index); otherwise below the selected block or at the end */
+  /* the components a kind of page can hold; set on Settings > Components */
+  function libraryOf(template) { return Blocks.libraries.of(template, Store.data.site); }
+  function templateName(t) { return String(Blocks.templates[t] || t).toLowerCase(); }
+  function outsideLibrary(page) { var lib = libraryOf(page.template); return (page.blocks || []).filter(function (b) { return Blocks.registry[b.type] && lib.indexOf(b.type) === -1; }); }
   function addBlockDialog(opts) {
     opts = opts || {};
-    var page = App.page;
+    var page = App.page, lib = libraryOf(page.template), libName = templateName(page.template) + ' library', showOthers = false;
     var search = el('input', { class: 'input', type: 'search', placeholder: 'Search blocks…', 'aria-label': 'Search blocks' });
     var cat = 'all';
     var chips = el('div', { class: 'chips', role: 'group', 'aria-label': 'Category' });
     var grid = el('div', { class: 'picker' });
-    var cats = [['all', 'All']].concat(Blocks.groups.map(function (g) { return [g, g]; }));
-    function renderChips() { chips.innerHTML = ''; cats.forEach(function (c) { chips.appendChild(el('button', { type: 'button', class: 'chip' + (cat === c[0] ? ' is-active' : ''), 'aria-pressed': cat === c[0] ? 'true' : 'false', onclick: function () { cat = c[0]; renderChips(); render(); } }, [c[1]])); }); }
+    function inLib(s) { return lib.indexOf(s.type) !== -1; }
+    var cats;
+    function renderChips() {
+      cats = [['all', 'All']].concat(Blocks.groups.filter(function (g) { return Blocks.list().some(function (s) { return s.group === g && (showOthers || inLib(s)); }); }).map(function (g) { return [g, g]; }));
+      if (!cats.some(function (c) { return c[0] === cat; })) cat = 'all';
+      chips.innerHTML = ''; cats.forEach(function (c) { chips.appendChild(el('button', { type: 'button', class: 'chip' + (cat === c[0] ? ' is-active' : ''), 'aria-pressed': cat === c[0] ? 'true' : 'false', onclick: function () { cat = c[0]; renderChips(); render(); } }, [c[1]])); }); }
     function card(s) {
-      var fits = s.scope.indexOf(page.template) !== -1;
-      return el('button', { type: 'button', class: 'picker__item' + (fits ? '' : ' picker__item--dim'), title: fits ? '' : 'Designed for ' + s.scope.join(' / ') + ' pages, but can be used here', onclick: function () { insert(s.type); } }, [el('strong', { text: s.label }), el('span', { class: 'small muted', text: BLOCK_DESC[s.type] || s.group })]);
+      var fits = inLib(s);
+      return el('button', { type: 'button', class: 'picker__item' + (fits ? '' : ' picker__item--dim'), title: fits ? '' : 'Not in the ' + libName + ': Jadu may not allow it on this kind of page', onclick: function () { insert(s.type); } }, [el('strong', { text: s.label }), el('span', { class: 'small muted', text: BLOCK_DESC[s.type] || s.group })]);
     }
     function matches(s, q) { return !q || (s.label + ' ' + s.type + ' ' + (BLOCK_DESC[s.type] || '')).toLowerCase().indexOf(q) !== -1; }
     function render() {
@@ -1192,17 +1204,30 @@
       grid.innerHTML = '';
       var all = Blocks.list(), shown = 0;
       if (!q && cat === 'all') {
-        var recent = recentBlocks().map(function (t) { return Blocks.registry[t]; }).filter(Boolean);
+        var recent = recentBlocks().map(function (t) { return Blocks.registry[t]; }).filter(function (s) { return s && inLib(s); });
         if (recent.length) { grid.appendChild(el('h3', { class: 'picker__group', text: 'Recently used' })); recent.forEach(function (s) { grid.appendChild(card(s)); shown++; }); }
       }
       Blocks.groups.forEach(function (g) {
         if (cat !== 'all' && cat !== g) return;
-        var specs = all.filter(function (s) { return s.group === g && matches(s, q); });
+        var specs = all.filter(function (s) { return s.group === g && inLib(s) && matches(s, q); });
         if (!specs.length) return;
         grid.appendChild(el('h3', { class: 'picker__group', text: g }));
         specs.forEach(function (s) { grid.appendChild(card(s)); shown++; });
       });
-      if (!shown) grid.appendChild(el('p', { class: 'muted', text: 'No blocks match "' + search.value.trim() + '".' }));
+      // components outside the page type's library: listed when searching for them or when asked for
+      var others = all.filter(function (s) { return !inLib(s) && (cat === 'all' || s.group === cat) && matches(s, q); });
+      if (others.length && (showOthers || q)) {
+        grid.appendChild(el('h3', { class: 'picker__group', text: 'Not in the ' + libName }));
+        grid.appendChild(el('p', { class: 'picker__note small muted', text: 'Jadu may not allow these on this kind of page. Change what each kind of page can hold on Settings, Components.' }));
+        others.forEach(function (s) { grid.appendChild(card(s)); shown++; });
+      } else if (others.length) {
+        var n = all.filter(function (s) { return !inLib(s); }).length;
+        grid.appendChild(el('div', { class: 'picker__more small' }, [
+          el('span', { class: 'muted', text: n + ' more component' + (n === 1 ? ' is' : 's are') + ' not in the ' + libName + '.' }),
+          el('button', { class: 'btn btn--xs', type: 'button', onclick: function () { showOthers = true; renderChips(); render(); } }, ['Show them'])
+        ]));
+      }
+      if (!shown && !(others.length && !showOthers && !q)) grid.appendChild(el('p', { class: 'muted', text: 'No blocks match "' + search.value.trim() + '".' }));
     }
     function insert(type) {
       var b = { id: Store.uid('blk'), type: type, props: Blocks.defaultsFor(type) };
@@ -1533,7 +1558,15 @@
 
   /* ---------- Check page ---------- */
   function checkHtml(page) { var c = ctx(); return R.renderBody(c.site, page, { editor: true, pages: c.pages, sections: c.sections }); }
-  function runCheck(page) { return RV.checkPage(checkHtml(page), { slugs: Store.data.pages.map(function (p) { return p.slug; }) }); }
+  function runCheck(page) {
+    var res = RV.checkPage(checkHtml(page), { slugs: Store.data.pages.map(function (p) { return p.slug; }) });
+    // blocks this kind of page cannot hold in Jadu, by the project's component libraries
+    var extra = outsideLibrary(page).map(function (b) {
+      return { level: 'warn', type: 'library', blockId: b.id, message: blockSpec(b).label + ' is not in the ' + templateName(page.template) + ' library, so Jadu may not allow it here. Use a homepage, or change the library on Settings, Components.' };
+    });
+    if (extra.length) { res.issues = extra.concat(res.issues); res.warnings += extra.length; }
+    return res;
+  }
   function liveUrl(path, page) {
     var origin = 'https://www.leeds.ac.uk';
     try { if (page.source && page.source.url) origin = new URL(page.source.url).origin; } catch (e) {}
@@ -2071,7 +2104,7 @@
       el('div', { class: 'starters' }, [
         tile('site', 'Site', 'Masthead, navigation, banners and footer shared by every page.', '#site'),
         tile('theme', 'Theme', 'Colours, fonts, presets and custom CSS for the whole project.', '#theme'),
-        tile('library', 'Components', 'Every block in its default state, shown with the current theme.', '#library')
+        tile('library', 'Components', 'Every block with the current theme, and the library of components each kind of page can hold.', '#library')
       ])
     ]);
   }
@@ -2171,26 +2204,91 @@
 
   /* ================= component library ================= */
   function libraryHtml() {
-    var site = Store.data.site;
+    var site = Store.data.site, tpl = App.libTemplate || '', lib = tpl ? libraryOf(tpl) : null;
     var blocks = [];
     Blocks.groups.forEach(function (g) {
-      var specs = Blocks.list().filter(function (s) { return s.group === g; });
+      var specs = Blocks.list().filter(function (s) { return s.group === g && (!lib || lib.indexOf(s.type) !== -1); });
       if (!specs.length) return;
-      blocks.push({ id: 'lib-g-' + g, type: 'raw-html', props: { html: '<h2 style="margin-top:3rem;padding-top:1rem;border-top:4px solid #c70000">' + esc(g) + '</h2>', inline: false } });
+      blocks.push({ id: 'lib-g-' + g, type: 'raw-html', props: { html: '<h2 style="width:100%;margin-top:3rem;padding-top:1rem;border-top:4px solid #c70000">' + esc(g) + '</h2>', inline: false } });
       specs.forEach(function (s) {
-        blocks.push({ id: 'lib-h-' + s.type, type: 'raw-html', props: { html: '<p style="margin:2rem 0 .5rem;font-family:sans-serif;font-size:.8rem;letter-spacing:.05em;text-transform:uppercase;color:#636363">' + esc(s.label) + ' <code>' + esc(s.type) + '</code></p>', inline: false } });
+        blocks.push({ id: 'lib-h-' + s.type, type: 'raw-html', props: { html: '<p style="width:100%;margin:2rem 0 .5rem;font-family:sans-serif;font-size:.8rem;letter-spacing:.05em;text-transform:uppercase;color:#636363">' + esc(s.label) + ' <code>' + esc(s.type) + '</code></p>', inline: false } });
         blocks.push({ id: 'lib-' + s.type, type: s.type, props: Blocks.defaultsFor(s.type) });
       });
     });
-    var typo = { id: 'lib-typo', type: 'raw-html', props: { html: '<h2 style="margin-top:3rem;padding-top:1rem;border-top:4px solid #c70000">Typography</h2><div class="uol-rich-text"><p class="text-size-epic">Epic</p><h1>Heading 1</h1><h2>Heading 2</h2><h3>Heading 3</h3><h4>Heading 4</h4><h5>Heading 5</h5><h6>Heading 6</h6><p class="uol-typography-paragraph-intro">Intro paragraph. Lorem ipsum dolor sit amet, consectetur adipiscing elit.</p><p>Default paragraph with a <a href="#">text link</a>, <strong>bold</strong> and <em>emphasis</em>.</p><p class="uol-typography-paragraph-small">Small paragraph.</p><ul><li>Unordered item</li><li>Another item</li></ul><ol><li>Ordered item</li><li>Another item</li></ol></div>', inline: false } };
-    var doc = R.renderFragmentDocument(site, [typo].concat(blocks), { template: 'homepage', title: 'Component library', editor: false, live: true, pages: [] });
-    return doc.replace('class="uol-homepage-content">', 'class="uol-homepage-content"><h1 style="margin:2rem 0 0">Component library</h1><p class="uol-typography-paragraph-intro">Every block in its default state, rendered with the current theme.</p>');
+    var typo = { id: 'lib-typo', type: 'raw-html', props: { html: '<h2 style="width:100%;margin-top:3rem;padding-top:1rem;border-top:4px solid #c70000">Typography</h2><div class="uol-rich-text" style="width:100%"><p class="text-size-epic">Epic</p><h1>Heading 1</h1><h2>Heading 2</h2><h3>Heading 3</h3><h4>Heading 4</h4><h5>Heading 5</h5><h6>Heading 6</h6><p class="uol-typography-paragraph-intro">Intro paragraph. Lorem ipsum dolor sit amet, consectetur adipiscing elit.</p><p>Default paragraph with a <a href="#">text link</a>, <strong>bold</strong> and <em>emphasis</em>.</p><p class="uol-typography-paragraph-small">Small paragraph.</p><ul><li>Unordered item</li><li>Another item</li></ul><ol><li>Ordered item</li><li>Another item</li></ol></div>', inline: false } };
+    // a page type's library is drawn in that page type's layout
+    var asTpl = tpl === 'homepage' || !tpl ? 'homepage' : 'document';
+    var title = tpl ? Blocks.templates[tpl] + ' library' : 'Component library';
+    var intro = tpl ? 'The components that can be added to ' + templateName(tpl) + 's, rendered with the current theme.' : 'Every block in its default state, rendered with the current theme.';
+    var doc = R.renderFragmentDocument(site, [typo].concat(blocks), { template: asTpl, title: title, editor: false, live: true, pages: [] });
+    // on a homepage the content is a row of full-width items, so each heading and label takes a whole row
+    var head = '<h1 style="width:100%;margin:2rem 0 0">' + esc(title) + '</h1><p class="uol-typography-paragraph-intro" style="width:100%">' + esc(intro) + '</p>';
+    return asTpl === 'homepage' ? doc.replace('class="uol-homepage-content">', 'class="uol-homepage-content">' + head) : doc.replace('class="uol-page">', 'class="uol-page">' + head);
   }
+  var LIB_INTRO = {
+    homepage: 'Homepages hold widgets as well as everything in the rich text editor.',
+    document: 'A Jadu document page holds what its rich text editor offers, so the document page library has those components only.',
+    article: 'Articles hold rich text and the components designed for news, events and profiles.'
+  };
   function libraryView() {
     Preview.mode = 'library';
+    App.libTemplate = App.libTemplate || '';
+    var site = Store.data.site;
     var pane = previewPane({ extra: [el('button', { class: 'btn btn--sm', type: 'button', onclick: function () { X.download(new Blob([libraryHtml().replace(/<link rel="stylesheet" href="assets\/ds\/css\/style.css">/, '<style>' + window.UOL_INLINE_CSS + '</style>').replace(/<script src="assets\/ds\/scripts\/[^"]+"><\/script>/g, '')], { type: 'text/html' }), 'leeds-component-library.html'); } }, ['Download as HTML'])] });
-    screenTopbar('Components', [el('span', { class: 'small muted topbar__hint', text: 'All ' + Blocks.list().length + ' blocks with the current theme' })]);
-    return el('div', { class: 'editor editor--full' }, [el('div', { class: 'editor__body' }, [pane])]);
+    var side = el('aside', { class: 'editor__side lib-side' });
+    var tabs = el('div', { class: 'seg', role: 'group', 'aria-label': 'Which components' });
+    function count(t) { return libraryOf(t).length; }
+    var openGroups = {}; // which groups are open, kept while items are switched on and off
+    function renderTabs() {
+      tabs.innerHTML = '';
+      [['', 'All'], ['homepage', 'Homepage'], ['document', 'Document page'], ['article', 'Article']].forEach(function (o) {
+        tabs.appendChild(el('button', { type: 'button', class: 'seg__btn' + (App.libTemplate === o[0] ? ' is-active' : ''), 'aria-pressed': App.libTemplate === o[0] ? 'true' : 'false', onclick: function () { App.libTemplate = o[0]; renderTabs(); renderSide(); reloadPreview(false); } }, [o[1] + (o[0] ? ' (' + count(o[0]) + ')' : '')]));
+      });
+    }
+    function renderSide() {
+      side.innerHTML = '';
+      var t = App.libTemplate, body = el('div', { class: 'editor__side-body' });
+      if (!t) {
+        side.appendChild(el('div', { class: 'side-title' }, [el('h2', { text: 'Component libraries' }), el('span', { class: 'small muted', text: 'What each kind of page can hold' })]));
+        body.appendChild(el('p', { class: 'small', text: 'Each kind of page has its own library. Add a block shows the page\'s library, and Check page flags blocks from outside it, so a prototype only uses what Jadu allows on that kind of page.' }));
+        ['homepage', 'document', 'article'].forEach(function (k) {
+          body.appendChild(el('div', { class: 'lib-sum' }, [
+            el('div', {}, [el('strong', { text: Blocks.templates[k] }), el('div', { class: 'small muted', text: count(k) + ' of ' + Blocks.list().length + ' components' + (Blocks.libraries.customised(site, k) ? ', changed for this project' : '') }), el('div', { class: 'small muted', text: LIB_INTRO[k] })]),
+            el('button', { class: 'btn btn--sm', type: 'button', onclick: function () { App.libTemplate = k; renderTabs(); renderSide(); reloadPreview(false); } }, ['Edit'])
+          ]));
+        });
+        side.appendChild(body);
+        return;
+      }
+      var lib = libraryOf(t), defs = Blocks.libraries.defaults(t), custom = Blocks.libraries.customised(site, t);
+      side.appendChild(el('div', { class: 'side-title' }, [el('h2', { text: Blocks.templates[t] + ' library' }), el('span', { class: 'small muted', text: lib.length + ' of ' + Blocks.list().length + ' components' + (custom ? ', changed for this project' : '') })]));
+      body.appendChild(el('p', { class: 'small', text: LIB_INTRO[t] + ' Tick a component to let it be added to ' + templateName(t) + 's.' }));
+      if (custom) body.appendChild(el('div', { class: 'row' }, [el('button', { class: 'btn btn--sm', type: 'button', onclick: function () {
+        UI.confirm('Reset the library', 'Put the ' + templateName(t) + ' library back to the default? Blocks already on pages stay where they are.', 'Reset').then(function (ok) { if (!ok) return; Blocks.libraries.reset(site, t); markDirty(); renderTabs(); renderSide(); reloadPreview(true); });
+      } }, ['Reset to the default'])]));
+      Blocks.groups.forEach(function (g) {
+        var specs = Blocks.list().filter(function (s) { return s.group === g; });
+        if (!specs.length) return;
+        var on = specs.filter(function (s) { return lib.indexOf(s.type) !== -1; }).length;
+        var key = t + ':' + g, sec = section(g + ' (' + on + ' of ' + specs.length + ')', openGroups[key] !== undefined ? openGroups[key] : on > 0);
+        sec.el.addEventListener('toggle', function () { openGroups[key] = sec.el.open; });
+        specs.forEach(function (s) {
+          var cb = el('input', { type: 'checkbox', checked: lib.indexOf(s.type) !== -1 });
+          cb.addEventListener('change', function () { Blocks.libraries.set(site, t, s.type, cb.checked); markDirty(); renderTabs(); renderSide(); reloadPreviewSoon(); });
+          var changed = (defs.indexOf(s.type) !== -1) !== cb.checked;
+          sec.body.appendChild(el('label', { class: 'check lib-item' }, [cb, el('span', {}, [el('span', { text: s.label }), changed ? el('span', { class: 'lib-item__changed', text: cb.checked ? 'added' : 'removed' }) : null, el('span', { class: 'small muted lib-item__desc', text: BLOCK_DESC[s.type] || '' })])]));
+        });
+        body.appendChild(sec.el);
+      });
+      // keep the scroll position while switching items on and off
+      var keep = side.__scroll || 0; side.appendChild(body); body.scrollTop = keep; body.addEventListener('scroll', function () { side.__scroll = body.scrollTop; });
+    }
+    renderTabs(); renderSide();
+    screenTopbar('Components', [tabs]);
+    var mobileTabs = mobileTabBar();
+    var wrap = el('div', { class: 'editor', 'data-pane': App.mobilePane }, [mobileTabs, el('div', { class: 'editor__body' }, [side, pane])]);
+    mobileTabs.bind(wrap);
+    return wrap;
   }
 
   /* ================= media view ================= */
@@ -2764,8 +2862,8 @@
       el('div', { class: 'panel', html:
         '<h2>What this is</h2><p>A local prototyping CMS that renders pages with the real University of Leeds design system (v1.0.22) stylesheet and scripts, so prototypes look and behave exactly like leeds.ac.uk. It runs in your browser from a folder of files; nothing is installed and nothing is sent anywhere.</p>' +
         '<h2>Opening it</h2><p>Double-click <code>index.html</code>. That is all. (A local server, <code>serve.ps1</code>, is optional and only adds "import by URL"; the grabber extension covers that without a server.)</p>' +
-        '<h2>Finding your way around</h2><p>The icons down the left edge switch between Pages, Media, Import, Save &amp; export, Cloud, Settings and Help (hover for the name). <strong>Settings</strong> holds the screens you need less often: Site (masthead, navigation, banners and footer), Theme (colours, fonts and custom CSS) and Components (every block with the current theme). The bar across the top shows the current screen with its actions; in the editor it holds the page title, path, template and status, undo and redo, the preview width icons, the Preview / HTML switch, the save state dot, <strong>Open page</strong> and a <strong>&#8943;</strong> menu with versions, every export format, duplicate and delete.</p>' +
-        '<h2>Editing</h2><ul><li><strong>Click</strong> a block in the preview to select it; a toolbar appears with move up/down, duplicate, delete and "Add below". <strong>Drag ☰</strong> to move a block.</li><li><strong>Hover</strong> a block in the preview and a red <strong>+</strong> appears on a dashed line below it (above it when you hover its top edge): click it to insert a block there. The red <strong>+</strong> in the top bar inserts below the selected block, or at the end. The inserter has search, category chips and your recently used blocks; Enter inserts the first match.</li><li><strong>Double-click text</strong> in the preview to edit it in place. Enter or clicking away saves; Esc cancels.</li><li><strong>Ctrl+click</strong> a link in the preview to follow it.</li><li>The <strong>HTML</strong> switch in the top bar shows the design-system markup of the page or the selected block, with Copy for Jadu.</li><li>The panel on the right is the <strong>inspector</strong>. <strong>Block</strong> lists the page\'s blocks (the outline) until you select one, then shows that block\'s fields; <strong>Page</strong> holds the heading, breadcrumb, banner, side column and versions; <strong>Section</strong> shows where the page sits, lets you step between the pages of its section, reorder them and change the generated navigation.</li><li><strong>Sections</strong> group pages: the side menu, contents list and previous/next links are generated from the pages in a section.</li><li><kbd>Esc</kbd> returns from a block to the outline.</li></ul>' +
+        '<h2>Finding your way around</h2><p>The icons down the left edge switch between Pages, Media, Import, Save &amp; export, Cloud, Settings and Help (hover for the name). <strong>Settings</strong> holds the screens you need less often: Site (masthead, navigation, banners and footer), Theme (colours, fonts and custom CSS) and Components (every block with the current theme, and the component library for each kind of page). The bar across the top shows the current screen with its actions; in the editor it holds the page title, path, template and status, undo and redo, the preview width icons, the Preview / HTML switch, the save state dot, <strong>Open page</strong> and a <strong>&#8943;</strong> menu with versions, every export format, duplicate and delete.</p>' +
+        '<h2>Editing</h2><ul><li><strong>Click</strong> a block in the preview to select it; a toolbar appears on its top edge with the block\'s name, move up/down, duplicate, delete and <strong>Add below</strong>. Drag the dotted handle at its left to move the block.</li><li><strong>Component libraries</strong>: each kind of page has its own. Homepages take the widgets and everything else; document pages take what the Jadu rich text editor offers. The inserter shows the page\'s library (<strong>Show them</strong> lists the rest), and Check page flags blocks from outside it. Change a library on Settings, Components.</li><li><strong>Hover</strong> a block in the preview and a red <strong>+</strong> appears on a dashed line below it (above it when you hover its top edge): click it to insert a block there. The red <strong>+</strong> in the top bar inserts below the selected block, or at the end. The inserter has search, category chips and your recently used blocks; Enter inserts the first match.</li><li><strong>Double-click text</strong> in the preview to edit it in place. Enter or clicking away saves; Esc cancels.</li><li><strong>Ctrl+click</strong> a link in the preview to follow it.</li><li>The <strong>HTML</strong> switch in the top bar shows the design-system markup of the page or the selected block, with Copy for Jadu.</li><li>The panel on the right is the <strong>inspector</strong>. <strong>Block</strong> lists the page\'s blocks (the outline) until you select one, then shows that block\'s fields; <strong>Page</strong> holds the heading, breadcrumb, banner, side column and versions; <strong>Section</strong> shows where the page sits, lets you step between the pages of its section, reorder them and change the generated navigation.</li><li><strong>Sections</strong> group pages: the side menu, contents list and previous/next links are generated from the pages in a section.</li><li><kbd>Esc</kbd> returns from a block to the outline.</li></ul>' +
         '<h2>Images</h2><p>Every image field has <strong>Library</strong>, <strong>Upload</strong> and placeholder buttons, and accepts a dropped file. The rich text toolbar has an Image button too. Images live in the Media library (browser database, and your project folder when linked), not inside the page, so the project stays small.</p>' +
         '<h2>Saving</h2><p>The working copy lives in about 5 MB of browser storage. Save &amp; export shows what uses it; the CMS warns when it is 70% and 90% full, and <strong>Free up space</strong> removes older page versions or the originals of finished pages. Snapshots and images are kept in the browser\'s database, which has far more room.</p><p>Autosave is always on. For safety, <strong>link a project folder</strong> (Save &amp; export): project.json and images are written there after every change. You can also save <strong>versions</strong> of a page (Ctrl+S), take whole-project <strong>snapshots</strong>, and <strong>save a project file</strong> (Ctrl+Shift+S).</p>' +
         '<h2>Cloud and sharing</h2><p>Once cloud saving is set up (see <code>DEPLOY.md</code>), the <strong>Cloud</strong> screen lets you sign in, upload this project, and share it with colleagues to view or edit. Changes are saved here first and uploaded a few seconds later; colleagues\' changes arrive every minute. Different pages edited at the same time are merged; if two people change the same page, the more recent edit is kept and the other person is told. The chip next to <strong>Saved</strong> in the top bar shows the cloud state, and <strong>Earlier copies</strong> on the Cloud screen restores an hourly cloud copy.</p>' +

@@ -245,7 +245,8 @@
     if (!(ctx && ctx.editor)) return html;
     var a = annotate(block, html);
     var extra = a.whole ? ' data-uol-edit="' + attr(a.whole.path) + '" data-uol-kind="' + a.whole.kind + '"' + (a.whole.multiline ? ' data-uol-ml="1"' : '') : '';
-    return '<div class="uol-cms-block" data-block-id="' + attr(block.id) + '" data-block-type="' + attr(block.type) + '"' + extra + '>' + a.html + '</div>';
+    var spec = window.UOL_BLOCKS.registry[block.type], label = spec ? String(spec.label).replace(/\s*\(widget\)$/i, '') : block.type;
+    return '<div class="uol-cms-block" data-block-id="' + attr(block.id) + '" data-block-type="' + attr(block.type) + '" data-block-label="' + attr(label) + '"' + extra + '>' + a.html + '</div>';
   }
 
   function renderBlocks(blocks, page, ctx) {
@@ -404,10 +405,10 @@
       'function blk(id){return q(\'.uol-cms-block[data-block-id="\'+id+\'"]\');}' +
       /* toolbar */
       'var bar=document.createElement("div");bar.className="uol-cms-bar";bar.setAttribute("contenteditable","false");' +
-      'bar.innerHTML=\'<span class="uol-cms-bar__grip" draggable="true" title="Drag to move this block">\\u2630</span><span class="uol-cms-bar__type"></span><button type="button" data-a="up" title="Move up">\\u2191</button><button type="button" data-a="down" title="Move down">\\u2193</button><button type="button" data-a="dup" title="Duplicate">\\u29C9</button><button type="button" data-a="del" title="Delete">\\u2715</button><button type="button" data-a="add" class="uol-cms-bar__add" title="Insert a block below this one">+ Add below</button><span class="uol-cms-bar__hint">double-click text to edit \\u00b7 Ctrl+click links</span>\';' +
+      'bar.innerHTML=' + JSON.stringify(BAR_HTML) + ';' +
       'bar.addEventListener("click",function(e){var b=e.target.closest("button");if(!b)return;e.preventDefault();e.stopPropagation();if(cur)send({uolcms:"blockAction",id:cur.getAttribute("data-block-id"),action:b.getAttribute("data-a")});},true);' +
       'bar.addEventListener("mousedown",function(e){if(!e.target.closest(".uol-cms-bar__grip"))e.preventDefault();});' +
-      'function attachBar(el){bar.querySelector(".uol-cms-bar__type").textContent=el.getAttribute("data-block-type");el.appendChild(bar);}' +
+      'function attachBar(el){bar.querySelector(".uol-cms-bar__type").textContent=el.getAttribute("data-block-label")||el.getAttribute("data-block-type");el.appendChild(bar);}' +
       'function select(el,scroll){if(cur&&cur!==el){cur.classList.remove("uol-cms-block--selected");}cur=el;if(cur){cur.classList.add("uol-cms-block--selected");attachBar(cur);if(scroll)cur.scrollIntoView({behavior:"smooth",block:"nearest"});}else if(bar.parentNode)bar.parentNode.removeChild(bar);}' +
       /* selection */
       'document.addEventListener("click",function(e){if(editing&&editing.contains(e.target)){e.preventDefault();e.stopPropagation();return;}if(e.target.closest(".uol-cms-bar"))return;var b=e.target.closest&&e.target.closest(".uol-cms-block");if(b){send({uolcms:"select",id:b.getAttribute("data-block-id")});}},true);' +
@@ -457,17 +458,29 @@
 
   // on homepages the blocks are flex items that each take a full row; the editor's wrapper has to do the same
   var EDITOR_CSS = '.uol-homepage-content>.uol-cms-block{flex:0 0 100%;max-width:100%;min-width:0}' +
-    '.uol-cms-block{position:relative;outline:2px solid transparent;outline-offset:-2px;transition:outline-color .15s}.uol-cms-block:hover{outline-color:rgba(199,0,0,.35)}.uol-cms-block--selected{outline-color:#c70000!important;box-shadow:0 0 0 4px rgba(199,0,0,.12)}' +
-    '.uol-cms-bar{position:absolute;top:0;right:0;z-index:30;display:flex;align-items:center;gap:1px;background:#0e0c0c;color:#fff;padding:2px 4px 2px 2px;font:12px/1 "Segoe UI",system-ui,Arial,sans-serif;border-radius:0 0 0 6px;box-shadow:0 4px 14px rgba(0,0,0,.3);max-width:100%;flex-wrap:wrap;user-select:none}' +
-    '.uol-cms-bar button{all:unset;cursor:pointer;padding:5px 7px;border-radius:3px;font-weight:700;color:#fff;font-size:13px;line-height:1}.uol-cms-bar button:hover{background:#c70000}.uol-cms-bar__add{font-size:12px;margin-left:4px;border:1px solid #666;}' +
-    '.uol-cms-bar__type{font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin:0 6px 0 2px;color:#ffd27a;font-size:11px}.uol-cms-bar__grip{cursor:grab;padding:5px 7px;color:#ddd}.uol-cms-bar__grip:active{cursor:grabbing}.uol-cms-bar__hint{color:#aaa;margin-left:8px;font-size:11px}' +
+    '.uol-cms-block{position:relative;outline:2px solid transparent;outline-offset:-2px;transition:outline-color .15s}.uol-cms-block:hover{outline:1px dashed rgba(199,0,0,.45);outline-offset:-1px}.uol-cms-block--selected,.uol-cms-block--selected:hover{outline:2px solid #c70000!important;outline-offset:-2px}' +
+    /* the block toolbar: a white bar on the top edge of the selected block, styled like the CMS around the preview */
+    '.uol-cms-bar{position:absolute;top:0;right:10px;transform:translateY(-50%);z-index:30;display:flex;align-items:center;gap:2px;padding:3px;background:#fff;color:#212529;border:1px solid #d9d6d2;border-radius:8px;box-shadow:0 6px 18px rgba(0,0,0,.16);font:600 12.5px/1 "Segoe UI",system-ui,-apple-system,Arial,sans-serif;max-width:calc(100% - 20px);user-select:none;white-space:nowrap}' +
+    '.uol-cms-bar button{all:unset;box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;gap:4px;height:28px;min-width:28px;border-radius:6px;color:#444;cursor:pointer}.uol-cms-bar button:hover{background:#f3f2f1;color:#111}.uol-cms-bar button:focus-visible{outline:2px solid #197ebe;outline-offset:1px}' +
+    '.uol-cms-bar svg{width:16px;height:16px;flex:none}.uol-cms-bar__grip{display:inline-flex;align-items:center;justify-content:center;width:22px;height:28px;color:#8a8580;cursor:grab;border-radius:6px}.uol-cms-bar__grip:hover{background:#f3f2f1;color:#212529}.uol-cms-bar__grip:active{cursor:grabbing}' +
+    '.uol-cms-bar__type{padding:0 10px 0 2px;margin-right:2px;border-right:1px solid #ebe8e5;line-height:28px;font-weight:700;overflow:hidden;text-overflow:ellipsis;max-width:200px;cursor:default}' +
+    '.uol-cms-bar button.uol-cms-bar__del:hover{background:#fde8ea;color:#c70000}.uol-cms-bar button.uol-cms-bar__add{margin-left:4px;padding:0 10px 0 8px;background:#c70000;color:#fff}.uol-cms-bar button.uol-cms-bar__add:hover{background:#910000;color:#fff}' +
     '[data-uol-edit]{cursor:text}.uol-cms-block--selected [data-uol-edit]:hover{box-shadow:inset 0 0 0 1px rgba(25,126,190,.6);border-radius:2px}' +
     '.uol-cms-editing{outline:2px solid #197ebe!important;outline-offset:2px;background:rgba(25,126,190,.06)!important;cursor:text}' +
     '.uol-cms-drop-before{box-shadow:inset 0 6px 0 #c70000!important}.uol-cms-drop-after{box-shadow:inset 0 -6px 0 #c70000!important}body.uol-cms-dragging .uol-cms-block{outline-color:rgba(199,0,0,.25)}' +
     '.uol-cms-insert{position:absolute;z-index:35;height:0;display:none;pointer-events:none}.uol-cms-insert.is-on{display:block}.uol-cms-insert::before{content:"";position:absolute;left:0;right:0;top:0;border-top:2px dashed rgba(199,0,0,.55)}' +
     '.uol-cms-insert__btn{all:unset;pointer-events:auto;position:absolute;left:50%;top:0;transform:translate(-50%,-50%);width:26px;height:26px;border-radius:50%;background:#c70000;color:#fff;font:700 18px/26px Arial,sans-serif;text-align:center;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.3)}.uol-cms-insert__btn:hover{background:#910000}' +
     '.uol-cms-empty{margin:2rem 0;padding:2.5rem 1rem;border:2px dashed #c9c5c0;border-radius:8px;text-align:center;font-family:"Segoe UI",system-ui,Arial,sans-serif;color:#636363}.uol-cms-empty p{margin:0 0 .5rem}.uol-cms-empty__btn{all:unset;cursor:pointer;display:inline-block;margin-top:.25rem;padding:10px 18px;border-radius:6px;background:#c70000;color:#fff;font-weight:700}.uol-cms-empty__btn:hover{background:#910000}' +
-    '@media (max-width:600px){.uol-cms-bar__hint{display:none}}';
+    '@media (max-width:600px){.uol-cms-bar__type{display:none}.uol-cms-bar button.uol-cms-bar__add span{display:none}}';
+  /* the toolbar's buttons: outline icons on one grid, like the CMS's own */
+  function barIcon(d) { return '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + d + '</svg>'; }
+  var BAR_HTML = '<span class="uol-cms-bar__grip" draggable="true" title="Drag to move this block">' + barIcon('<circle cx="9" cy="6" r=".6"/><circle cx="15" cy="6" r=".6"/><circle cx="9" cy="12" r=".6"/><circle cx="15" cy="12" r=".6"/><circle cx="9" cy="18" r=".6"/><circle cx="15" cy="18" r=".6"/>') + '</span>' +
+    '<span class="uol-cms-bar__type" title="Double-click text to edit it here. Ctrl+click follows a link."></span>' +
+    '<button type="button" data-a="up" title="Move up" aria-label="Move up">' + barIcon('<path d="M12 19V5M6 11l6-6 6 6"/>') + '</button>' +
+    '<button type="button" data-a="down" title="Move down" aria-label="Move down">' + barIcon('<path d="M12 5v14M6 13l6 6 6-6"/>') + '</button>' +
+    '<button type="button" data-a="dup" title="Duplicate" aria-label="Duplicate">' + barIcon('<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/>') + '</button>' +
+    '<button type="button" data-a="del" class="uol-cms-bar__del" title="Delete" aria-label="Delete">' + barIcon('<path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/>') + '</button>' +
+    '<button type="button" data-a="add" class="uol-cms-bar__add" title="Add a block below this one">' + barIcon('<path d="M12 5v14M5 12h14"/>') + '<span>Add below</span></button>';
   var EMPTY_STATE = '<div class="uol-cms-empty"><p>This page has no blocks yet.</p><button type="button" class="uol-cms-empty__btn">+ Add your first block</button></div>';
 
   function renderDocument(site, page, opts) {
