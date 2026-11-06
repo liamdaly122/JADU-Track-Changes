@@ -134,7 +134,7 @@
     function sep() { return el('span', { class: 'rte__sep', 'aria-hidden': 'true' }); }
     function menu(label, title, items) {
       var list = el('div', { class: 'menu rte__menu', hidden: true }, items.map(function (i) { return i === '-' ? el('hr') : el('button', { type: 'button', class: 'menu__item', onmousedown: function (e) { e.preventDefault(); }, onclick: function (e) { e.preventDefault(); list.hidden = true; i.onClick(); } }, [i.label]); }));
-      var b = el('button', { type: 'button', class: 'rte__btn', title: title, 'aria-haspopup': 'true', onmousedown: function (e) { e.preventDefault(); saveRange(); }, onclick: function (e) { e.preventDefault(); e.stopPropagation(); var open = list.hidden; document.querySelectorAll('.rte__menu').forEach(function (m) { m.hidden = true; }); list.hidden = !open; } }, [label + ' ▾']);
+      var b = el('button', { type: 'button', class: 'rte__btn', title: title, 'aria-haspopup': 'true', onmousedown: function (e) { e.preventDefault(); saveRange(); }, onclick: function (e) { e.preventDefault(); e.stopPropagation(); var open = list.hidden; document.querySelectorAll('.menu').forEach(function (m) { m.hidden = true; }); if (open) floatMenu(list, b, { align: 'left' }); } }, [label + ' ▾']);
       document.addEventListener('click', function () { list.hidden = true; });
       return el('span', { class: 'menu-wrap' }, [b, list]);
     }
@@ -476,5 +476,39 @@
     return wrap;
   }
 
-  window.UOL_UI = { el: el, esc: esc, debounce: debounce, toast: toast, modal: modal, confirm: confirm, prompt: prompt, renderForm: renderForm, richEditor: richEditor, imageField: imageField, mediaPicker: mediaPicker, fmtBytes: fmtBytes, cleanHtml: cleanHtml };
+
+  /* Menus open on top of the whole app, not inside the box that holds their button, so a list with one row (or a
+     panel that scrolls) never cuts a menu off. The menu moves to <body> while it is open and is placed next to its
+     button: below it, or above it when there is more room there; opts.side 'right' opens it to the right (the rail),
+     opts.align 'left' lines it up with the button's left edge. Scrolling elsewhere or resizing closes it. */
+  function floatMenu(menu, anchor, opts) {
+    opts = opts || {};
+    Array.prototype.forEach.call(document.querySelectorAll('body > .menu--float'), function (m) { if (m !== menu && !(m._home && m._home.isConnected)) m.remove(); });
+    if (!menu._home || menu.parentNode !== document.body) menu._home = menu.parentNode;
+    document.body.appendChild(menu);
+    menu.classList.add('menu--float');
+    menu.style.maxHeight = ''; menu.style.visibility = 'hidden'; menu.hidden = false;
+    var r = anchor.getBoundingClientRect(), vw = document.documentElement.clientWidth, vh = document.documentElement.clientHeight, gap = 4, pad = 8;
+    var w = menu.offsetWidth, h = menu.offsetHeight, top, left;
+    if (opts.side === 'right') {
+      left = r.right + 10;
+      top = Math.max(pad, Math.min(r.bottom - h, vh - h - pad));
+      if (h > vh - pad * 2) { menu.style.maxHeight = (vh - pad * 2) + 'px'; top = pad; }
+    } else {
+      var below = vh - r.bottom - gap - pad, above = r.top - gap - pad, up = h > below && above > below, room = up ? above : below;
+      if (h > room) { menu.style.maxHeight = Math.max(room, 80) + 'px'; h = Math.max(room, 80); }
+      top = up ? r.top - gap - h : r.bottom + gap;
+      left = opts.align === 'left' ? r.left : r.right - w;
+    }
+    left = Math.max(pad, Math.min(left, vw - w - pad));
+    menu.style.top = Math.round(top) + 'px'; menu.style.left = Math.round(left) + 'px';
+    menu.style.visibility = '';
+  }
+  function closeFloatingMenus(e) {
+    Array.prototype.forEach.call(document.querySelectorAll('.menu--float:not([hidden])'), function (m) { if (!(e && e.target && e.target.nodeType === 1 && m.contains(e.target))) m.hidden = true; });
+  }
+  document.addEventListener('scroll', closeFloatingMenus, true);
+  window.addEventListener('resize', function () { closeFloatingMenus(); });
+
+  window.UOL_UI = { el: el, esc: esc, debounce: debounce, toast: toast, modal: modal, confirm: confirm, prompt: prompt, renderForm: renderForm, richEditor: richEditor, imageField: imageField, mediaPicker: mediaPicker, fmtBytes: fmtBytes, cleanHtml: cleanHtml, floatMenu: floatMenu };
 })();
