@@ -226,9 +226,22 @@
   }
 
   /* ---------- blocks ---------- */
+  /* Review copies only need to know which block is which. The block's own top-level elements carry its id, with no
+     wrapper, so the page has the same structure as the live site: the design system lays out homepage blocks as
+     flex items and spaces them with sibling rules (+, :first-of-type), which a wrapper element would break.
+     A block whose HTML starts with bare text falls back to a wrapper. */
+  function markBlock(block, html) {
+    var tpl = document.createElement('template');
+    tpl.innerHTML = html;
+    var nodes = Array.prototype.slice.call(tpl.content.childNodes);
+    var bare = nodes.some(function (n) { return n.nodeType === 3 && /\S/.test(n.textContent); });
+    var els = nodes.filter(function (n) { return n.nodeType === 1; });
+    if (bare || !els.length) return '<div class="uol-cms-block" data-block-id="' + attr(block.id) + '" data-block-type="' + attr(block.type) + '">' + html + '</div>';
+    els.forEach(function (e) { e.setAttribute('data-block-id', block.id); e.setAttribute('data-block-type', block.type); });
+    return tpl.innerHTML;
+  }
   function blockWrap(block, html, ctx) {
-    // review copies with comments only need to know which block is which, not the editing hooks
-    if (ctx && ctx.markBlocks && !ctx.editor) return '<div class="uol-cms-block" data-block-id="' + attr(block.id) + '" data-block-type="' + attr(block.type) + '">' + html + '</div>';
+    if (ctx && ctx.markBlocks && !ctx.editor) return markBlock(block, html);
     if (!(ctx && ctx.editor)) return html;
     var a = annotate(block, html);
     var extra = a.whole ? ' data-uol-edit="' + attr(a.whole.path) + '" data-uol-kind="' + a.whole.kind + '"' + (a.whole.multiline ? ' data-uol-ml="1"' : '') : '';
@@ -442,7 +455,9 @@
       'send({uolcms:"ready"});})();</script>';
   }
 
-  var EDITOR_CSS = '.uol-cms-block{position:relative;outline:2px solid transparent;outline-offset:-2px;transition:outline-color .15s}.uol-cms-block:hover{outline-color:rgba(199,0,0,.35)}.uol-cms-block--selected{outline-color:#c70000!important;box-shadow:0 0 0 4px rgba(199,0,0,.12)}' +
+  // on homepages the blocks are flex items that each take a full row; the editor's wrapper has to do the same
+  var EDITOR_CSS = '.uol-homepage-content>.uol-cms-block{flex:0 0 100%;max-width:100%;min-width:0}' +
+    '.uol-cms-block{position:relative;outline:2px solid transparent;outline-offset:-2px;transition:outline-color .15s}.uol-cms-block:hover{outline-color:rgba(199,0,0,.35)}.uol-cms-block--selected{outline-color:#c70000!important;box-shadow:0 0 0 4px rgba(199,0,0,.12)}' +
     '.uol-cms-bar{position:absolute;top:0;right:0;z-index:30;display:flex;align-items:center;gap:1px;background:#0e0c0c;color:#fff;padding:2px 4px 2px 2px;font:12px/1 "Segoe UI",system-ui,Arial,sans-serif;border-radius:0 0 0 6px;box-shadow:0 4px 14px rgba(0,0,0,.3);max-width:100%;flex-wrap:wrap;user-select:none}' +
     '.uol-cms-bar button{all:unset;cursor:pointer;padding:5px 7px;border-radius:3px;font-weight:700;color:#fff;font-size:13px;line-height:1}.uol-cms-bar button:hover{background:#c70000}.uol-cms-bar__add{font-size:12px;margin-left:4px;border:1px solid #666;}' +
     '.uol-cms-bar__type{font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin:0 6px 0 2px;color:#ffd27a;font-size:11px}.uol-cms-bar__grip{cursor:grab;padding:5px 7px;color:#ddd}.uol-cms-bar__grip:active{cursor:grabbing}.uol-cms-bar__hint{color:#aaa;margin-left:8px;font-size:11px}' +
