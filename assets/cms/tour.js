@@ -149,7 +149,13 @@
   var open = null;
   var LOOP_MS = 7500;                        // each picture plays again after this long
   var CONFETTI = ['#c70000', '#910000', '#0e0c0c', '#ffd27a', '#156265', '#f3e3e3'];
-  function calm() { return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches); }
+  /* the computer can ask for reduced motion (on Windows: Settings, Accessibility, Visual effects, Animation effects,
+     which is often off on managed laptops and in remote desktop sessions). The tour then stands still, says why,
+     and offers to play the animations anyway; that choice is remembered in this browser. */
+  var MOTION_KEY = 'leeds-cms:tour-motion';
+  function reduced() { return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches); }
+  function forced() { try { return localStorage.getItem(MOTION_KEY) === 'on'; } catch (e) { return false; } }
+  function calm() { return reduced() && !forced(); }
   function start(opts) {
     opts = opts || {};
     if (open) open.close(false);
@@ -168,7 +174,24 @@
     STEPS.forEach(function (s, n) { var d = h('button', 'tour__dot'); d.type = 'button'; d.setAttribute('aria-label', 'Step ' + (n + 1)); d.onclick = function () { show(n); }; dots.appendChild(d); });
     var card = h('div', 'tour__card', [progress, closeX, stage, h('div', 'tour__body', [copy, h('div', 'tour__foot', [dots, h('span', 'tour__spacer'), skip, back, next])])]);
     card.setAttribute('role', 'dialog'); card.setAttribute('aria-modal', 'true'); card.setAttribute('aria-labelledby', 'tour-title');
-    var overlay = h('div', 'tour', [card]);
+    var overlay = h('div', 'tour' + (forced() ? ' tour--motion' : ''), [card]);
+    if (reduced()) {
+      var note = h('span'), toggle = h('button'); toggle.type = 'button';
+      var motionNote = h('p', 'tour__motion', [note, toggle]);
+      var paint = function () {
+        var on = forced();
+        note.textContent = on ? 'Animations are on, although your computer asks for less motion.' : 'The pictures are still because your computer is set to reduce motion.';
+        toggle.textContent = on ? 'Keep them still' : 'Play the animations';
+      };
+      toggle.onclick = function () {
+        try { if (forced()) localStorage.removeItem(MOTION_KEY); else localStorage.setItem(MOTION_KEY, 'on'); } catch (e) {}
+        overlay.classList.toggle('tour--motion', forced());
+        paint(); show(i);
+        toggle.focus();
+      };
+      paint();
+      copy.parentNode.insertBefore(motionNote, copy);
+    }
     var before = document.activeElement;
     /* the picture for step n, built fresh so its animation starts from the beginning */
     function scene(n, cls) { return h('div', 'tour__scene tour__scene--' + n + (cls ? ' ' + cls : ''), [STEPS[n].scene()]); }
