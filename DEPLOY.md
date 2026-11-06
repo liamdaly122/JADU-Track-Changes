@@ -213,7 +213,7 @@ Then, in the editor:
 
 - **Changes** in the top bar lists what changed since the original leeds.ac.uk page, with **Word** and **PDF** change lists for Jadu.
 - The **Review** tab on the right checks the page, and holds sign-off and comments.
-- **Share a review link** in the ⋯ menu makes a read-only link for reviewers without an account, who can comment with their name. Manage links on the **Cloud** screen.
+- **Share a review link** in the ⋯ menu makes a read-only link for reviewers without an account, who can comment with their name, and approve or ask for changes if you allow it. Manage links on the **Cloud** screen.
 
 ---
 

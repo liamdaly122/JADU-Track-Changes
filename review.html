@@ -8,8 +8,9 @@
   <title>Review copy</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23c70000'/%3E%3Ctext x='16' y='22' font-size='18' font-family='Arial' font-weight='700' fill='%23fff' text-anchor='middle'%3EL%3C/text%3E%3C/svg%3E">
   <!-- A read-only copy of prototype pages, opened from a review link (review.html#<token>/<page path>).
-       The copy is fetched with the site's public key and the token in the link. Reviewers can comment with their
-       name when the link allows it; the only thing kept in this browser is that name, to fill it in next time. -->
+       The copy is fetched with the site's public key and the token in the link. When the link allows it, reviewers can
+       comment and approve or ask for changes, with their name (and role); the only things kept in this browser are that
+       name and role, to fill them in next time. -->
   <style>
     html, body { margin: 0; height: 100%; }
     body { display: flex; flex-direction: column; background: #f3f2f1; color: #212529; font: 13.5px/1.45 "Segoe UI", system-ui, -apple-system, Roboto, Helvetica, Arial, sans-serif; }
@@ -35,7 +36,17 @@
     .panel { flex: 0 0 360px; width: 360px; display: flex; flex-direction: column; background: #fff; border-left: 1px solid #d9d6d2; min-height: 0; }
     .panel__head { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid #d9d6d2; }
     .panel__head h2 { flex: 1; font-size: 1rem; margin: 0; }
-    .panel__list { flex: 1; overflow: auto; padding: 10px 14px; display: flex; flex-direction: column; gap: 8px; }
+    .panel__scroll { flex: 1; overflow: auto; padding: 10px 14px; display: flex; flex-direction: column; gap: 12px; }
+    .panel__scroll h3 { font-size: .95rem; margin: 0 0 4px; }
+    .panel__you { display: flex; flex-direction: column; gap: 8px; }
+    .panel__list { display: flex; flex-direction: column; gap: 8px; }
+    .signoff { border: 1px solid #d9d6d2; border-radius: 8px; padding: 10px 12px; background: #faf9f8; display: flex; flex-direction: column; gap: 8px; }
+    .signoff p { margin: 0; }
+    .step { font-size: .85rem; padding: 6px 8px; border-radius: 6px; background: #fff; border: 1px solid #e6e3df; }
+    .step strong { display: block; }
+    .step--approved { border-left: 4px solid #1f7a3a; }
+    .step--changes_requested { border-left: 4px solid #b00020; }
+    .confirm { border-top: 1px dashed #d9d6d2; padding-top: 8px; display: flex; flex-direction: column; gap: 8px; }
     .panel__form { border-top: 1px solid #d9d6d2; padding: 10px 14px 14px; display: flex; flex-direction: column; gap: 8px; }
     .panel label { font-weight: 600; font-size: .85rem; display: flex; flex-direction: column; gap: 3px; }
     .input { font: inherit; padding: 6px 8px; border: 1px solid #b9b5b1; border-radius: 6px; background: #fff; color: inherit; width: 100%; box-sizing: border-box; }
@@ -73,15 +84,35 @@
       <label><span class="hide">Page</span><select id="page"></select></label>
       <button type="button" id="next" aria-label="Next page">&#8250;</button>
     </span>
-    <button type="button" class="primary" id="toggle" aria-pressed="false" aria-controls="panel" hidden>Comments</button>
+    <button type="button" class="primary" id="toggle" aria-pressed="false" aria-controls="panel" hidden>Review</button>
   </header>
   <main id="main"><div class="stage" id="stage"></div>
-    <aside class="panel" id="panel" aria-label="Comments" hidden>
-      <div class="panel__head"><h2 id="panel-title">Comments</h2><button type="button" class="btn btn--sm" id="close" aria-label="Close comments">Close</button></div>
-      <div class="panel__list" id="list" aria-live="polite"></div>
-      <form class="panel__form" id="form">
+    <aside class="panel" id="panel" aria-label="Review" hidden>
+      <div class="panel__head"><h2 id="panel-title">Review</h2><button type="button" class="btn btn--sm" id="close" aria-label="Close the review panel">Close</button></div>
+      <div class="panel__scroll">
+        <div class="panel__you">
+          <label>Your name<input class="input" id="who" type="text" maxlength="80" autocomplete="name"></label>
+          <label id="role-field" hidden>Your role (optional)<input class="input" id="role" type="text" maxlength="120" autocomplete="organization-title" placeholder="For example: Head of Admissions"></label>
+        </div>
+        <section class="signoff" id="signoff" hidden aria-labelledby="signoff-title">
+          <h3 id="signoff-title">Sign off this page</h3>
+          <p class="small muted">The team that made this prototype asked you to approve this page, or say what needs to change.</p>
+          <div id="steps" class="panel__list" aria-live="polite"></div>
+          <div class="row" id="signoff-actions"><button type="button" class="btn btn--primary" id="approve">Approve this page</button><button type="button" class="btn" id="changes">Ask for changes</button></div>
+          <div class="confirm" id="confirm" hidden>
+            <p class="small" id="confirm-text"></p>
+            <label><span id="note-label">Note (optional)</span><textarea class="input" id="note" maxlength="2000"></textarea></label>
+            <div class="row"><button type="button" class="btn btn--primary" id="confirm-send">Approve</button><button type="button" class="btn" id="confirm-cancel">Cancel</button></div>
+          </div>
+          <span class="small" id="signoff-status" role="status"></span>
+        </section>
+        <section id="comments" hidden aria-labelledby="comments-title">
+          <h3 id="comments-title">Comments on this page</h3>
+          <div class="panel__list" id="list" aria-live="polite"></div>
+        </section>
+      </div>
+      <form class="panel__form" id="form" hidden>
         <p class="small muted" style="margin:0">Your comments go to the team that made this prototype. Other people with this link can see them too.</p>
-        <label>Your name<input class="input" id="who" type="text" maxlength="80" autocomplete="name" required></label>
         <div class="target"><span class="muted">About:</span><strong id="target">The whole page</strong><button type="button" class="btn btn--sm" id="pick">Pick a part</button><button type="button" class="btn btn--sm" id="clear" hidden aria-label="Comment on the whole page instead">&#10005;</button></div>
         <label>Comment<textarea class="input" id="body" maxlength="2000" required></textarea></label>
         <div class="row"><button type="submit" class="btn btn--primary" id="send">Send comment</button><span class="small" id="status" role="status"></span></div>
@@ -117,7 +148,7 @@
       var stage = $('stage'), bar = $('bar'), sel = $('page'), prev = $('prev'), next = $('next');
       var cfg = window.UOL_CLOUD_CONFIG || {}, url = String(cfg.url || '').trim().replace(/\/+$/, ''), key = String(cfg.anonKey || '').trim();
       var m = /^#([0-9a-f]{64})(?:\/(.*))?$/.exec(location.hash), token = m && m[1];
-      var copy = null, frame = null, comments = [], target = null, picking = false, NAME_KEY = 'uol-review-name';
+      var copy = null, frame = null, comments = [], signoffs = [], pending = null, target = null, picking = false, NAME_KEY = 'uol-review-name', ROLE_KEY = 'uol-review-role';
       var headers = { 'Content-Type': 'application/json', apikey: key };
       if (/^eyJ/.test(key)) headers.Authorization = 'Bearer ' + key;
 
@@ -157,7 +188,7 @@
         document.title = page.title + ' | Review copy';
         setTarget(null); setPicking(false);
         frame.srcdoc = window.UOL_RENDER.renderDocument(d.site || {}, page, { pages: d.pages, sections: d.sections || [], markBlocks: !!copy.allow_comments });
-        renderComments();
+        renderComments(); cancelSignoff(); renderSignoffs();
       }
       function go(i) { var p = copy.data.pages[i]; if (p) location.hash = '#' + token + '/' + slugOf(p); }
       function frameDoc() { try { return frame.contentDocument; } catch (e) { return null; } }
@@ -216,13 +247,63 @@
         if (picking) note('Click the part of the page your comment is about. Esc cancels.');
       }
       function openPanel(on) { $('panel').hidden = !on; $('toggle').setAttribute('aria-pressed', on ? 'true' : 'false'); if (on && !$('who').value) $('who').focus(); }
+      function updateToggle() {
+        var open = comments.filter(function (c) { return !c.resolved_at; }).length;
+        var label = copy.allow_comments && copy.allow_approvals ? 'Review' : copy.allow_approvals ? 'Sign off' : 'Comments';
+        $('toggle').textContent = label + (copy.allow_comments && open ? ' (' + open + ')' : '');
+      }
+      function rememberName() {
+        var name = $('who').value.trim();
+        if (!name) { $('who').focus(); return null; }
+        try { localStorage.setItem(NAME_KEY, name); localStorage.setItem(ROLE_KEY, $('role').value.trim()); } catch (err) {}
+        return name;
+      }
+
+      /* ---------- sign-off: approve this page, or ask for changes ---------- */
+      function renderSignoffs() {
+        if (!copy || !copy.allow_approvals) return;
+        var page = current(), list = $('steps');
+        list.innerHTML = '';
+        signoffs.filter(function (s) { return s.page_id === page.id; }).forEach(function (s) {
+          var step = el('div', 'step step--' + s.status);
+          step.appendChild(el('strong', '', (s.status === 'approved' ? 'Approved by ' : 'Changes asked for by ') + s.guest_name + (s.guest_role ? ', ' + s.guest_role : '')));
+          step.appendChild(el('span', 'muted', fmt(s.at)));
+          if (s.note) step.appendChild(el('div', 'comment__body', s.note));
+          list.appendChild(step);
+        });
+      }
+      function askSignoff(status) {
+        var page = current();
+        pending = status;
+        $('signoff-status').textContent = '';
+        $('confirm').hidden = false; $('signoff-actions').hidden = true;
+        $('confirm-text').textContent = status === 'approved'
+          ? 'You are approving "' + page.title + '" as this review copy shows it (copy from ' + fmt(copy.updated_at) + '). The team sees your name, your role if you give it, and the time.'
+          : 'Tell the team what needs to change on "' + page.title + '". You can add comments on particular parts of the page as well.';
+        $('note-label').textContent = status === 'approved' ? 'Note (optional)' : 'What needs to change';
+        $('confirm-send').textContent = status === 'approved' ? 'Approve' : 'Send';
+        $('note').value = '';
+        (status === 'approved' && $('who').value ? $('confirm-send') : status === 'approved' ? $('who') : $('note')).focus();
+      }
+      function cancelSignoff() { pending = null; $('confirm').hidden = true; $('signoff-actions').hidden = false; }
+      function sendSignoff() {
+        var name = rememberName(); if (!name) { $('signoff-status').className = 'small error'; $('signoff-status').textContent = 'Add your name first.'; return; }
+        var note = $('note').value.trim(), page = current(), status = pending;
+        if (status === 'changes_requested' && !note) { $('note').focus(); return; }
+        $('confirm-send').disabled = true; $('signoff-status').className = 'small muted'; $('signoff-status').textContent = 'Sending…';
+        rpc('add_guest_signoff', { p_token: token, p_page: page.id, p_status: status, p_name: name, p_role: $('role').value.trim() || null, p_note: note || null }).then(function () {
+          cancelSignoff();
+          $('signoff-status').className = 'small'; $('signoff-status').textContent = status === 'approved' ? 'Approved. Thank you, the team has been told.' : 'Sent. Thank you, the team has been told.';
+          return loadSignoffs();
+        }, function (err) { $('signoff-status').className = 'small error'; $('signoff-status').textContent = err.message; }).then(function () { $('confirm-send').disabled = false; });
+      }
+      function loadSignoffs() { return rpc('guest_signoff_list', { p_token: token }).then(function (rows) { signoffs = rows || []; renderSignoffs(); }, function () {}); }
       function renderComments() {
         var list = $('list'), page = copy && current(); if (!page) return;
         list.innerHTML = '';
         var mine = comments.filter(function (c) { return c.page_id === page.id; });
-        var open = comments.filter(function (c) { return !c.resolved_at; }).length;
-        $('toggle').textContent = 'Comments' + (open ? ' (' + open + ')' : '');
-        $('panel-title').textContent = 'Comments on this page' + (mine.length ? ' (' + mine.length + ')' : '');
+        updateToggle();
+        $('comments-title').textContent = 'Comments on this page' + (mine.length ? ' (' + mine.length + ')' : '');
         if (!mine.length) list.appendChild(el('p', 'small muted', 'No comments on this page yet.'));
         mine.forEach(function (c) {
           var card = el('div', 'comment' + (c.resolved_at ? ' is-resolved' : ''));
@@ -240,10 +321,9 @@
       }
       function send(e) {
         e.preventDefault();
-        var name = $('who').value.trim(), body = $('body').value.trim(), status = $('status'), page = current();
-        if (!name) { $('who').focus(); return; }
+        var body = $('body').value.trim(), status = $('status'), page = current();
+        var name = rememberName(); if (!name) { status.className = 'small error'; status.textContent = 'Add your name first.'; return; }
         if (!body) { $('body').focus(); return; }
-        try { localStorage.setItem(NAME_KEY, name); } catch (err) {}
         $('send').disabled = true; status.className = 'small muted'; status.textContent = 'Sending…';
         rpc('add_guest_comment', { p_token: token, p_page: page.id, p_block: target, p_block_label: target ? blockLabel(page, target) : null, p_name: name, p_body: body }).then(function () {
           $('body').value = ''; setTarget(null); status.className = 'small'; status.textContent = 'Sent. Thank you.';
@@ -272,16 +352,27 @@
         sel.addEventListener('change', function () { go(+sel.value); });
         prev.addEventListener('click', function () { go(+sel.value - 1); });
         next.addEventListener('click', function () { go(+sel.value + 1); });
-        if (copy.allow_comments) {
-          $('toggle').hidden = false;
+        if (copy.allow_comments || copy.allow_approvals) {
+          $('toggle').hidden = false; updateToggle();
           $('toggle').addEventListener('click', function () { openPanel($('panel').hidden); });
           $('close').addEventListener('click', function () { openPanel(false); });
+          try { $('who').value = localStorage.getItem(NAME_KEY) || ''; $('role').value = localStorage.getItem(ROLE_KEY) || ''; } catch (err) {}
+        }
+        if (copy.allow_comments) {
+          $('comments').hidden = false; $('form').hidden = false;
           $('pick').addEventListener('click', function () { setPicking(!picking); });
           $('clear').addEventListener('click', function () { setTarget(null); });
           $('form').addEventListener('submit', send);
-          try { $('who').value = localStorage.getItem(NAME_KEY) || ''; } catch (err) {}
           loadComments();
           setInterval(function () { if (!$('panel').hidden && document.visibilityState === 'visible') loadComments(); }, 60000);
+        }
+        if (copy.allow_approvals) {
+          $('signoff').hidden = false; $('role-field').hidden = false;
+          $('approve').addEventListener('click', function () { askSignoff('approved'); });
+          $('changes').addEventListener('click', function () { askSignoff('changes_requested'); });
+          $('confirm-send').addEventListener('click', sendSignoff);
+          $('confirm-cancel').addEventListener('click', cancelSignoff);
+          loadSignoffs();
         }
         // another review link pasted into this tab: start again with its copy
         window.addEventListener('hashchange', function () { if (location.hash.slice(1, 65) !== token) location.reload(); else show(); });
