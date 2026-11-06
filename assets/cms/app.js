@@ -1000,9 +1000,10 @@
   function menuButton(label, items, opts) {
     opts = opts || {};
     var menu = el('div', { class: 'menu', hidden: true }, items.map(function (i) { return i === '-' ? el('hr') : el('button', { type: 'button', class: 'menu__item', onclick: function () { menu.hidden = true; i.onClick(); } }, [i.label]); }));
+    function toggle(b) { var open = menu.hidden; document.querySelectorAll('.menu').forEach(function (m) { m.hidden = true; }); if (open) UI.floatMenu(menu, b); }
     var btn = opts.icon
-      ? el('button', { class: 'ibtn', type: 'button', 'aria-haspopup': 'true', title: opts.title || label || 'Menu', 'aria-label': opts.title || label || 'Menu', onclick: function (e) { e.stopPropagation(); var open = menu.hidden; document.querySelectorAll('.menu').forEach(function (m) { m.hidden = true; }); menu.hidden = !open; } }, [icon(opts.icon)])
-      : el('button', { class: 'btn btn--sm', type: 'button', 'aria-haspopup': 'true', onclick: function (e) { e.stopPropagation(); var open = menu.hidden; document.querySelectorAll('.menu').forEach(function (m) { m.hidden = true; }); menu.hidden = !open; } }, [label + ' ▾']);
+      ? el('button', { class: 'ibtn', type: 'button', 'aria-haspopup': 'true', title: opts.title || label || 'Menu', 'aria-label': opts.title || label || 'Menu', onclick: function (e) { e.stopPropagation(); toggle(this); } }, [icon(opts.icon)])
+      : el('button', { class: 'btn btn--sm', type: 'button', 'aria-haspopup': 'true', onclick: function (e) { e.stopPropagation(); toggle(this); } }, [label + ' ▾']);
     document.addEventListener('click', function () { menu.hidden = true; });
     return el('span', { class: 'menu-wrap' }, [btn, menu]);
   }
@@ -2864,7 +2865,7 @@
       el('hr'),
       el('button', { type: 'button', class: 'menu__item', onclick: function () { menu.hidden = true; signOutNow(); } }, ['Sign out'])
     ]);
-    var btn = el('button', { type: 'button', class: 'rail__avatar', title: name + ' (' + (u.email || '') + ')', 'aria-label': 'Your account: ' + name, 'aria-haspopup': 'true', onclick: function (e) { e.stopPropagation(); var open = menu.hidden; document.querySelectorAll('.menu').forEach(function (m) { m.hidden = true; }); menu.hidden = !open; } }, [initials(name)]);
+    var btn = el('button', { type: 'button', class: 'rail__avatar', title: name + ' (' + (u.email || '') + ')', 'aria-label': 'Your account: ' + name, 'aria-haspopup': 'true', onclick: function (e) { e.stopPropagation(); var open = menu.hidden; document.querySelectorAll('.menu').forEach(function (m) { m.hidden = true; }); if (open) UI.floatMenu(menu, this, { side: 'right' }); } }, [initials(name)]);
     document.addEventListener('click', function () { menu.hidden = true; });
     return el('div', { class: 'rail__account' }, [btn, menu]);
   }
