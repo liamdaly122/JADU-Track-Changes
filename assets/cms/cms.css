@@ -542,7 +542,8 @@ button.issue:hover { background: #f6f5f4; }
   .page-head__actions .input { width: 100%; }
   .imgfield { flex-direction: column; }
 }
-@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+/* reduced motion: no transitions, except in a tour someone chose to play the animations in */
+@media (prefers-reduced-motion: reduce) { *:not(.tour--motion):not(.tour--motion *) { transition: none !important; } }
 
 /* ================= accounts: sign in and sign up ================= */
 body.is-auth .rail, body.is-auth .topbar, body.is-auth #banner-root { display: none; }
@@ -858,9 +859,12 @@ body.is-auth .rail, body.is-auth .topbar, body.is-auth #banner-root { display: n
 .ts-block--mine { outline: 2px solid var(--c-brand); outline-offset: -2px; }
 .ts-block--mine .ts-type { animation-delay: 2.2s, 2.2s; }
 @media (prefers-reduced-motion: reduce) {
-  .tour, .tour * { animation-duration: .001s !important; animation-delay: 0s !important; animation-iteration-count: 1 !important; transition: none !important; }
-  .ts-picker, .tour__blob, .ts-spark, .tour__confetti { display: none; }
+  .tour:not(.tour--motion), .tour:not(.tour--motion) * { animation-duration: .001s !important; animation-delay: 0s !important; animation-iteration-count: 1 !important; transition: none !important; }
+  .tour:not(.tour--motion) .ts-picker, .tour:not(.tour--motion) .tour__blob, .tour:not(.tour--motion) .ts-spark, .tour:not(.tour--motion) .tour__confetti { display: none; }
 }
+/* the note shown when the computer asks for reduced motion, with the choice to play the animations anyway */
+.tour__motion { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 0 0 12px; padding: 7px 10px; border-radius: 8px; background: #f6f3f1; font-size: .82rem; color: #4a4646; }
+.tour__motion button { border: 0; background: none; padding: 0; font: inherit; font-weight: 700; color: var(--c-brand-dark); text-decoration: underline; cursor: pointer; }
 .help-tour { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; background: linear-gradient(110deg, #fff 60%, #fdecec); }
 .help-tour h2 { margin: 0 0 2px; }
 .help-tour p { margin: 0; }
